@@ -49,6 +49,14 @@ function splitUtf8(text, maxBytes = NTFY_CHUNK_BYTES) {
   return chunks.length ? chunks : [''];
 }
 
+function normalizeDetail(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function fetchListingDetail(item) {
   const detailPage = await browser.newPage({
     viewport: { width: 1280, height: 1800 },
@@ -58,26 +66,29 @@ async function fetchListingDetail(item) {
 
   try {
     await detailPage.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await detailPage.waitForTimeout(1200);
+    await detailPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await detailPage.waitForTimeout(2000);
 
-    const main = detailPage.locator('main');
-    let text = '';
+    const candidates = await detailPage.evaluate(() => {
+      const selectors = ['main', 'article', '[role="main"]', 'body'];
+      const texts = [];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (text) texts.push({ selector, text });
+        }
+      }
+      return texts;
+    });
 
-    if (await main.count()) {
-      text = await main.first().innerText().catch(() => '');
-    }
-    if (!text.trim()) {
-      text = await detailPage.locator('body').innerText().catch(() => '');
-    }
+    const normalized = candidates
+      .map((x) => ({ ...x, text: normalizeDetail(x.text) }))
+      .filter((x) => x.text)
+      .sort((a, b) => Buffer.byteLength(b.text, 'utf8') - Buffer.byteLength(a.text, 'utf8'));
 
-    text = String(text || '')
-      .replace(/\r/g, '')
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-
-    console.log(`Detail text bytes for ${item.title}: ${Buffer.byteLength(text, 'utf8')}`);
-    return text;
+    const best = normalized[0] || { selector: 'none', text: '' };
+    console.log(`Detail source for ${item.title}: ${best.selector}, ${Buffer.byteLength(best.text, 'utf8')} bytes`);
+    return best.text;
   } catch (error) {
     console.warn(`Could not load listing detail for ${item.url}:`, error?.message || error);
     return '';
