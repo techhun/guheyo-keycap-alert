@@ -57,6 +57,54 @@ function normalizeDetail(text) {
     .trim();
 }
 
+async function inspectDetailPage(url) {
+  const debugPage = await browser.newPage({ locale: 'ko-KR' });
+  const jsonResponses = [];
+  debugPage.on('response', async (response) => {
+    try {
+      const ct = response.headers()['content-type'] || '';
+      if (!ct.includes('application/json')) return;
+      const u = response.url();
+      if (!u.includes('guheyo.com')) return;
+      const text = await response.text();
+      jsonResponses.push({ url: u, text: text.slice(0, 4000) });
+    } catch {}
+  });
+
+  try {
+    await debugPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await debugPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await debugPage.waitForTimeout(2500);
+
+    const data = await debugPage.evaluate(() => ({
+      title: document.title,
+      body: (document.body?.innerText || '').slice(0, 5000),
+      metas: [...document.querySelectorAll('meta')]
+        .map((m) => ({
+          name: m.getAttribute('name'),
+          property: m.getAttribute('property'),
+          content: m.getAttribute('content')
+        }))
+        .filter((x) => x.content),
+      jsonLd: [...document.querySelectorAll('script[type="application/ld+json"]')]
+        .map((s) => s.textContent || '')
+        .filter(Boolean),
+      nextData: document.querySelector('#__NEXT_DATA__')?.textContent || '',
+      scripts: [...document.scripts]
+        .map((s) => s.textContent || '')
+        .filter((t) => /description|content|offer|price|keycap/i.test(t))
+        .map((t) => t.slice(0, 4000))
+        .slice(0, 8)
+    }));
+
+    console.log('DETAIL DEBUG START');
+    console.log(JSON.stringify({ ...data, jsonResponses }, null, 2));
+    console.log('DETAIL DEBUG END');
+  } finally {
+    await debugPage.close();
+  }
+}
+
 async function fetchListingDetail(item) {
   const detailPage = await browser.newPage({
     viewport: { width: 1280, height: 1800 },
@@ -110,9 +158,7 @@ async function sendNotification(item) {
   for (let i = 0; i < chunks.length; i += 1) {
     const response = await fetch('https://ntfy.sh', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         topic: NTFY_TOPIC,
         title: chunks.length > 1 ? `키캡 새 매물 (${i + 1}/${chunks.length})` : '키캡 새 매물',
@@ -177,6 +223,10 @@ try {
     throw new Error('No keycap listings found. Guheyo page structure may have changed.');
   }
 
+  if (process.env.GITHUB_EVENT_NAME === 'push') {
+    await inspectDetailPage(candidates[0].href);
+  }
+
   const items = candidates.map((x) => {
     const parsed = parseListing(x.text);
     return {
@@ -202,7 +252,6 @@ try {
     if (fresh.length === 0) {
       console.log('No state update needed.');
     } else {
-      // 최신 목록의 위쪽부터 수집되므로 실제 등록 순서대로 알리기 위해 역순 전송한다.
       for (const item of fresh.slice(0, 10).reverse()) {
         console.log('New:', item.title, item.price, item.url);
         item.detail = await fetchListingDetail(item);
