@@ -31,23 +31,26 @@ function parseListing(text) {
 }
 
 async function sendNotification(item) {
-  const body = `${item.title}${item.price ? `\n${item.price}` : ''}`.slice(0, 900);
+  const message = `${item.title}${item.price ? `\n${item.price}` : ''}`.slice(0, 900);
 
   if (!NTFY_TOPIC) {
-    console.log('[notify:dry-run]', body, item.url);
+    console.log('[notify:dry-run]', message, item.url);
     return;
   }
 
-  const endpoint = `https://ntfy.sh/${encodeURIComponent(NTFY_TOPIC)}`;
-  const response = await fetch(endpoint, {
+  const response = await fetch('https://ntfy.sh', {
     method: 'POST',
     headers: {
-      Title: '키캡 새 매물',
-      Priority: 'high',
-      Tags: 'shopping_cart',
-      Click: item.url
+      'Content-Type': 'application/json'
     },
-    body
+    body: JSON.stringify({
+      topic: NTFY_TOPIC,
+      title: '키캡 새 매물',
+      message,
+      priority: 4,
+      tags: ['shopping_cart'],
+      click: item.url
+    })
   });
 
   if (!response.ok) {
