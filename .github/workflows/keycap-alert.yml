@@ -34,25 +34,6 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Send one-off ntfy test
-        if: github.event_name == 'push' && github.event.head_commit.message == 'Test ntfy notification'
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        shell: bash
-        run: |
-          if [ -z "$NTFY_TOPIC" ]; then
-            echo 'NTFY_TOPIC secret is empty or unavailable.'
-            exit 1
-          fi
-          curl -fSs \
-            -H 'Title: Keycap alert test' \
-            -H 'Priority: high' \
-            -H 'Tags: white_check_mark' \
-            -d '구해요 키캡 알림 테스트입니다. 이 알림이 보이면 푸시 연결이 정상입니다.' \
-            "https://ntfy.sh/$NTFY_TOPIC"
-          echo
-          echo 'ntfy test request sent successfully.'
-
       - name: Check Guheyo keycap listings
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
