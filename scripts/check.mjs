@@ -55,6 +55,17 @@ async function sendNotification(item) {
   }
 }
 
+function saveState(ids) {
+  fs.writeFileSync(
+    STATE_PATH,
+    JSON.stringify({
+      initialized: true,
+      updatedAt: new Date().toISOString(),
+      seen: [...new Set(ids)].slice(0, MAX_SEEN)
+    }, null, 2) + '\n'
+  );
+}
+
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await browser.newPage({
   viewport: { width: 1280, height: 1800 },
@@ -108,34 +119,22 @@ try {
 
   if (!state.initialized || seen.size === 0) {
     console.log(`Baseline initialization: storing ${items.length} current listings without notifying.`);
-    fs.writeFileSync(
-      STATE_PATH,
-      JSON.stringify({
-        initialized: true,
-        updatedAt: new Date().toISOString(),
-        seen: items.map((x) => x.id).slice(0, MAX_SEEN)
-      }, null, 2) + '\n'
-    );
-    process.exitCode = 0;
+    saveState(items.map((x) => x.id));
   } else {
     const fresh = items.filter((x) => !seen.has(x.id));
     console.log(`New listings: ${fresh.length}`);
 
-    // 최신 목록의 위쪽부터 수집되므로 실제 등록 순서대로 알리기 위해 역순 전송한다.
-    for (const item of fresh.slice(0, 10).reverse()) {
-      console.log('New:', item.title, item.price, item.url);
-      await sendNotification(item);
-    }
+    if (fresh.length === 0) {
+      console.log('No state update needed.');
+    } else {
+      // 최신 목록의 위쪽부터 수집되므로 실제 등록 순서대로 알리기 위해 역순 전송한다.
+      for (const item of fresh.slice(0, 10).reverse()) {
+        console.log('New:', item.title, item.price, item.url);
+        await sendNotification(item);
+      }
 
-    const nextSeen = [...items.map((x) => x.id), ...seen].slice(0, MAX_SEEN);
-    fs.writeFileSync(
-      STATE_PATH,
-      JSON.stringify({
-        initialized: true,
-        updatedAt: new Date().toISOString(),
-        seen: [...new Set(nextSeen)]
-      }, null, 2) + '\n'
-    );
+      saveState([...items.map((x) => x.id), ...seen]);
+    }
   }
 } finally {
   await browser.close();
