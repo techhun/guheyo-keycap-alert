@@ -24,7 +24,7 @@ function parseListing(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   const price = normalized.match(/([\d,]+\s*원)\s*$/)?.[1] || '';
   let title = normalized
-    .replace(/^(?:방금 전|하루 전|\d+\s*(?:초|분|시간|일)\s*전)\s+/, '')
+    .replace(/^(?:방금 전|하루 전|한 시간 전|\d+\s*(?:초|분|시간|일)\s*전)\s+/, '')
     .replace(/\s+키캡\s+[\d,]+\s*원\s*$/, '')
     .trim();
   if (!title) title = '새 키캡 매물';
@@ -57,52 +57,8 @@ function normalizeDetail(text) {
     .trim();
 }
 
-async function inspectDetailPage(url) {
-  const debugPage = await browser.newPage({ locale: 'ko-KR' });
-  const jsonResponses = [];
-  debugPage.on('response', async (response) => {
-    try {
-      const ct = response.headers()['content-type'] || '';
-      if (!ct.includes('application/json')) return;
-      const u = response.url();
-      if (!u.includes('guheyo.com')) return;
-      const text = await response.text();
-      jsonResponses.push({ url: u, text: text.slice(0, 4000) });
-    } catch {}
-  });
-
-  try {
-    await debugPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await debugPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    await debugPage.waitForTimeout(2500);
-
-    const data = await debugPage.evaluate(() => ({
-      title: document.title,
-      body: (document.body?.innerText || '').slice(0, 5000),
-      metas: [...document.querySelectorAll('meta')]
-        .map((m) => ({
-          name: m.getAttribute('name'),
-          property: m.getAttribute('property'),
-          content: m.getAttribute('content')
-        }))
-        .filter((x) => x.content),
-      jsonLd: [...document.querySelectorAll('script[type="application/ld+json"]')]
-        .map((s) => s.textContent || '')
-        .filter(Boolean),
-      nextData: document.querySelector('#__NEXT_DATA__')?.textContent || '',
-      scripts: [...document.scripts]
-        .map((s) => s.textContent || '')
-        .filter((t) => /description|content|offer|price|keycap/i.test(t))
-        .map((t) => t.slice(0, 4000))
-        .slice(0, 8)
-    }));
-
-    console.log('DETAIL DEBUG START');
-    console.log(JSON.stringify({ ...data, jsonResponses }, null, 2));
-    console.log('DETAIL DEBUG END');
-  } finally {
-    await debugPage.close();
-  }
+function cleanMetaDescription(text) {
+  return normalizeDetail(text).replace(/^[\d,]+\s*원\s*-\s*[^-]+?\s*-\s*/, '').trim();
 }
 
 async function fetchListingDetail(item) {
@@ -114,29 +70,50 @@ async function fetchListingDetail(item) {
 
   try {
     await detailPage.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await detailPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    await detailPage.waitForTimeout(2000);
+    await detailPage.waitForTimeout(1200);
 
-    const candidates = await detailPage.evaluate(() => {
-      const selectors = ['main', 'article', '[role="main"]', 'body'];
-      const texts = [];
-      for (const selector of selectors) {
-        for (const el of document.querySelectorAll(selector)) {
-          const text = (el.innerText || el.textContent || '').trim();
-          if (text) texts.push({ selector, text });
-        }
+    const detail = await detailPage.evaluate(({ title, price }) => {
+      // 구해요는 실제 판매글 본문을 Product JSON-LD description에 노출한다.
+      for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+        try {
+          const parsed = JSON.parse(script.textContent || 'null');
+          const nodes = Array.isArray(parsed) ? parsed : [parsed];
+          for (const node of nodes) {
+            if (node && node['@type'] === 'Product' && typeof node.description === 'string') {
+              return { source: 'json-ld', text: node.description };
+            }
+          }
+        } catch {}
       }
-      return texts;
-    });
 
-    const normalized = candidates
-      .map((x) => ({ ...x, text: normalizeDetail(x.text) }))
-      .filter((x) => x.text)
-      .sort((a, b) => Buffer.byteLength(b.text, 'utf8') - Buffer.byteLength(a.text, 'utf8'));
+      const meta = document.querySelector('meta[property="og:description"], meta[name="description"]');
+      if (meta?.getAttribute('content')) {
+        return { source: 'meta', text: meta.getAttribute('content') || '' };
+      }
 
-    const best = normalized[0] || { selector: 'none', text: '' };
-    console.log(`Detail source for ${item.title}: ${best.selector}, ${Buffer.byteLength(best.text, 'utf8')} bytes`);
-    return best.text;
+      // 마지막 보조 수단: 상세 화면에서 제목/가격 뒤부터 공유 버튼 전까지만 잘라낸다.
+      const lines = (document.body?.innerText || '')
+        .split(/\r?\n/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const titleIndex = lines.findIndex((x) => x === title);
+      if (titleIndex >= 0) {
+        let start = titleIndex + 1;
+        if (price && lines[start] === price) start += 1;
+        if (start < lines.length && /택배|배송|직거래|착불/.test(lines[start])) start += 1;
+        const endIndex = lines.findIndex((x, i) => i >= start && x === '공유');
+        const body = lines.slice(start, endIndex > start ? endIndex : lines.length).join('\n');
+        return { source: 'body-slice', text: body };
+      }
+
+      return { source: 'none', text: '' };
+    }, { title: item.title, price: item.price });
+
+    let text = normalizeDetail(detail.text);
+    if (detail.source === 'meta') text = cleanMetaDescription(text);
+
+    console.log(`Detail source for ${item.title}: ${detail.source}, ${Buffer.byteLength(text, 'utf8')} bytes`);
+    return text;
   } catch (error) {
     console.warn(`Could not load listing detail for ${item.url}:`, error?.message || error);
     return '';
@@ -221,10 +198,6 @@ try {
 
   if (candidates.length === 0) {
     throw new Error('No keycap listings found. Guheyo page structure may have changed.');
-  }
-
-  if (process.env.GITHUB_EVENT_NAME === 'push') {
-    await inspectDetailPage(candidates[0].href);
   }
 
   const items = candidates.map((x) => {
