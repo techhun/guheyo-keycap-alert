@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
-const MARKET_URL = process.env.GUHEYO_URL || 'https://guheyo.com/g/keyboard/sell';
+const MARKET_URL = process.env.GUHEYO_URL || 'https://guheyo.com/g/keyboard/sell?category=keycap';
 const NTFY_TOPIC = (process.env.NTFY_TOPIC || '').trim();
 const STATE_PATH = 'state.json';
 const MAX_SEEN = 300;
@@ -19,30 +19,20 @@ function loadState() {
   }
 }
 
-function cleanLines(text) {
-  return String(text || '')
-    .split(/\n+/)
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
-
-function pickTitle(text) {
-  const ignored = new Set([
-    '키보드', '키캡', '판매', '경매', '구매', '교환', '공동구매', '전체',
-    '커스텀', '기성품', '아티산', '스위치', '기타', '공임', '팔로잉'
-  ]);
-
-  for (const line of cleanLines(text)) {
-    if (ignored.has(line)) continue;
-    if (/^(\d+\s*(초|분|시간|일)\s*전|방금 전)$/.test(line)) continue;
-    if (/^[\d,]+\s*원$/.test(line)) continue;
-    if (line.length >= 3) return line;
-  }
-  return cleanLines(text)[0] || '새 키캡 매물';
+function parseListing(text) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const price = normalized.match(/([\d,]+\s*원)\s*$/)?.[1] || '';
+  let title = normalized
+    .replace(/^(?:방금 전|하루 전|\d+\s*(?:초|분|시간|일)\s*전)\s+/, '')
+    .replace(/\s+키캡\s+[\d,]+\s*원\s*$/, '')
+    .trim();
+  if (!title) title = '새 키캡 매물';
+  return { title, price, normalized };
 }
 
 async function sendNotification(item) {
-  const body = `${item.title}\n${item.summary}`.slice(0, 900);
+  const body = `${item.title}${item.price ? `\n${item.price}` : ''}`.slice(0, 900);
+
   if (!NTFY_TOPIC) {
     console.log('[notify:dry-run]', body, item.url);
     return;
@@ -52,111 +42,64 @@ async function sendNotification(item) {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
-      'Title': 'New keycap listing',
-      'Priority': 'high',
-      'Tags': 'shopping_cart',
-      'Click': item.url
+      Title: '키캡 새 매물',
+      Priority: 'high',
+      Tags: 'shopping_cart',
+      Click: item.url
     },
     body
   });
-  if (!response.ok) throw new Error(`ntfy failed: ${response.status} ${await response.text()}`);
+
+  if (!response.ok) {
+    throw new Error(`ntfy failed: ${response.status} ${await response.text()}`);
+  }
 }
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const page = await browser.newPage({
   viewport: { width: 1280, height: 1800 },
   locale: 'ko-KR',
   userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36'
 });
 
-const interestingResponses = [];
-page.on('response', async (response) => {
-  const req = response.request();
-  const type = req.resourceType();
-  const ct = (response.headers()['content-type'] || '').toLowerCase();
-  const url = response.url();
-  if (['xhr', 'fetch'].includes(type) || ct.includes('json') || /api|graphql|supabase|firebase/i.test(url)) {
-    interestingResponses.push({ status: response.status(), type, contentType: ct, url });
-  }
-});
-
 try {
   console.log('Opening:', MARKET_URL);
   await page.goto(MARKET_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForTimeout(6000);
 
-  const keycap = page.getByText('키캡', { exact: true });
-  if (await keycap.count()) {
-    try {
-      await keycap.first().click({ timeout: 10_000 });
-      await page.waitForTimeout(3000);
-    } catch (error) {
-      console.log('Keycap click skipped:', error.message);
-    }
-  } else {
-    console.log('No exact 키캡 control found; continuing with current page.');
-  }
+  const offerLinks = page.locator('a[href*="/offer/"]');
+  await offerLinks.first().waitFor({ state: 'attached', timeout: 20_000 });
+  await page.waitForTimeout(1500);
 
-  console.log('Filtered URL:', page.url());
-
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  console.log('BODY TEXT (first 12000 chars):');
-  console.log(bodyText.slice(0, 12000));
-
-  console.log('INTERESTING RESPONSES:');
-  console.log(JSON.stringify(interestingResponses.slice(-100), null, 2));
-
-  const scriptSrcs = await page.locator('script[src]').evaluateAll((nodes) => nodes.map((s) => s.src));
-  console.log('SCRIPT SRCS:');
-  console.log(JSON.stringify(scriptSrcs.slice(-80), null, 2));
-
-  const rawLinks = await page.locator('a[href]').evaluateAll((nodes) =>
+  const rawLinks = await offerLinks.evaluateAll((nodes) =>
     nodes.map((a) => ({
       href: a.href,
       text: (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim()
     }))
   );
 
-  const sameSite = rawLinks.filter((x) => {
-    try {
-      const u = new URL(x.href);
-      return u.hostname === 'guheyo.com' || u.hostname.endsWith('.guheyo.com');
-    } catch {
-      return false;
-    }
-  });
-
-  let candidates = sameSite.filter((x) =>
-    x.text.length >= 4 &&
-    (/[\d,]+\s*원/.test(x.text) || /(초|분|시간|일)\s*전/.test(x.text)) &&
-    !/^홈$|^장터$|^검색$|^나$/.test(x.text)
-  );
-
-  const byKey = new Map();
-  for (const item of candidates) {
-    const key = `${item.href}::${item.text}`;
-    if (!byKey.has(key)) byKey.set(key, item);
+  const unique = new Map();
+  for (const link of rawLinks) {
+    if (!link.href || !link.text) continue;
+    if (!/키캡/.test(link.text) || !/[\d,]+\s*원/.test(link.text)) continue;
+    if (!unique.has(link.href)) unique.set(link.href, link);
   }
-  candidates = [...byKey.values()];
 
-  console.log(`Found ${rawLinks.length} anchors, ${candidates.length} listing candidates.`);
-  console.log('Candidate sample:');
-  console.log(JSON.stringify(candidates.slice(0, 20), null, 2));
+  const candidates = [...unique.values()];
+  console.log(`Found ${candidates.length} keycap listings.`);
+  console.log(JSON.stringify(candidates.slice(0, 8), null, 2));
 
   if (candidates.length === 0) {
-    console.log('Anchor sample for diagnostics:');
-    console.log(JSON.stringify(sameSite.slice(0, 80), null, 2));
-    throw new Error('No listing candidates found. Selector/heuristic needs adjustment.');
+    throw new Error('No keycap listings found. Guheyo page structure may have changed.');
   }
 
   const items = candidates.map((x) => {
-    const normalized = x.text.replace(/\s+/g, ' ').trim();
-    const idSource = x.href && x.href !== page.url() ? x.href : normalized;
+    const parsed = parseListing(x.text);
     return {
-      id: hash(idSource),
-      url: x.href || page.url(),
-      title: pickTitle(x.text),
-      summary: normalized.slice(0, 500)
+      id: hash(x.href),
+      url: x.href,
+      title: parsed.title,
+      price: parsed.price,
+      summary: parsed.normalized
     };
   });
 
@@ -165,24 +108,34 @@ try {
 
   if (!state.initialized || seen.size === 0) {
     console.log(`Baseline initialization: storing ${items.length} current listings without notifying.`);
-    fs.writeFileSync(STATE_PATH, JSON.stringify({
-      initialized: true,
-      updatedAt: new Date().toISOString(),
-      seen: items.map((x) => x.id).slice(0, MAX_SEEN)
-    }, null, 2) + '\n');
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify({
+        initialized: true,
+        updatedAt: new Date().toISOString(),
+        seen: items.map((x) => x.id).slice(0, MAX_SEEN)
+      }, null, 2) + '\n'
+    );
+    process.exitCode = 0;
   } else {
     const fresh = items.filter((x) => !seen.has(x.id));
     console.log(`New listings: ${fresh.length}`);
+
+    // 최신 목록의 위쪽부터 수집되므로 실제 등록 순서대로 알리기 위해 역순 전송한다.
     for (const item of fresh.slice(0, 10).reverse()) {
-      console.log('New:', item.title, item.url);
+      console.log('New:', item.title, item.price, item.url);
       await sendNotification(item);
     }
+
     const nextSeen = [...items.map((x) => x.id), ...seen].slice(0, MAX_SEEN);
-    fs.writeFileSync(STATE_PATH, JSON.stringify({
-      initialized: true,
-      updatedAt: new Date().toISOString(),
-      seen: [...new Set(nextSeen)]
-    }, null, 2) + '\n');
+    fs.writeFileSync(
+      STATE_PATH,
+      JSON.stringify({
+        initialized: true,
+        updatedAt: new Date().toISOString(),
+        seen: [...new Set(nextSeen)]
+      }, null, 2) + '\n'
+    );
   }
 } finally {
   await browser.close();
