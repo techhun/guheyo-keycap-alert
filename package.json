@@ -1,0 +1,12 @@
+{
+  "name": "guheyo-keycap-alert",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
