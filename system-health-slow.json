@@ -1,19 +1,19 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T14:43:08.254Z",
+  "updatedAt": "2026-09-16T17:55:23.402Z",
   "sources": {
     "geonworks-gb": {
       "status": "ok",
       "changedAt": "2026-09-16T12:50:00.000Z"
     },
     "geonworks-release": {
-      "status": "ok",
-      "changedAt": "2026-09-16T12:50:00.000Z"
+      "status": "fail",
+      "changedAt": "2026-09-16T17:51:53.628Z"
     },
     "prototypist": {
-      "status": "ok",
-      "changedAt": "2026-09-16T12:50:00.000Z"
+      "status": "fail",
+      "changedAt": "2026-09-16T17:55:23.402Z"
     },
     "swagkeys": {
       "status": "ok",
