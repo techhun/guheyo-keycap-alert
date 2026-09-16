@@ -1,0 +1,47 @@
+name: Keycap channel test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/keycap-channel-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send keycap test
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          const webhook = (process.env.WEBHOOK || '').trim();
+          if (!webhook) throw new Error('DISCORD_WEBHOOK_URL is not configured');
+
+          const url = new URL(webhook);
+          url.searchParams.set('wait', 'true');
+
+          const embed = {
+            title: '🆕 키캡-팝니다 테스트 - 20',
+            description: '채널 권한 확인용 테스트 메시지입니다.\n\n[🔗 판매글 보기](https://guheyo.com/g/keyboard/sell?category=keycap)',
+            footer: { text: '구해요 · 키캡 판매 알림 · 테스트' },
+            timestamp: new Date().toISOString()
+          };
+
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'KEYCAP Alert',
+              allowed_mentions: { parse: [] },
+              embeds: [embed]
+            })
+          });
+
+          const body = await response.text();
+          if (!response.ok) throw new Error(`Discord failed: ${response.status} ${body}`);
+          const message = body ? JSON.parse(body) : {};
+          console.log('STATUS', response.status);
+          console.log('MESSAGE_ID', message.id || 'none');
+          console.log('CHANNEL_ID', message.channel_id || 'none');
+          NODE
