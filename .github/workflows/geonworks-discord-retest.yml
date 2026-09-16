@@ -1,0 +1,72 @@
+name: GEONWORKS Discord retest
+
+on:
+  push:
+    paths:
+      - '.github/workflows/geonworks-discord-retest.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send GEONWORKS retest alert
+        env:
+          GEONWORKS_DISCORD_WEBHOOK_URL: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const webhook = (process.env.GEONWORKS_DISCORD_WEBHOOK_URL || '').trim();
+          if (!webhook) throw new Error('GEONWORKS_DISCORD_WEBHOOK_URL is not configured');
+
+          const webhookInfoResponse = await fetch(webhook);
+          if (!webhookInfoResponse.ok) throw new Error(`Webhook lookup failed: ${webhookInfoResponse.status}`);
+          const webhookInfo = await webhookInfoResponse.json();
+          console.log('WEBHOOK_NAME', webhookInfo.name);
+          console.log('WEBHOOK_CHANNEL_ID', webhookInfo.channel_id);
+
+          const state = JSON.parse(fs.readFileSync('geonworks-state.json', 'utf8'));
+          const rows = Array.isArray(state.rows) ? state.rows : [];
+          const item = rows.find((x) => x?.product === 'TYPFACE KAFKA Barebones Kit') || rows[0];
+          if (!item) throw new Error('No GEONWORKS baseline row found');
+
+          const url = 'https://geonworks.kr/customhtml/GB_schedule.html';
+          const sendUrl = new URL(webhook);
+          sendUrl.searchParams.set('wait', 'true');
+
+          const response = await fetch(sendUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'GEONWORKS Alert',
+              content: '🔔 **지온웍스 알림 연결 재테스트** — 이 메시지가 `#지온웍스-업데이트`에 보여야 합니다.',
+              allowed_mentions: { parse: [] },
+              embeds: [{
+                title: `🧪 GEONWORKS 테스트 · ${item.product}`,
+                url,
+                fields: [
+                  { name: 'GB 시작일', value: item.gbStart || '—', inline: true },
+                  { name: '예상 발송일', value: item.eta || '—', inline: true },
+                  { name: '분류', value: item.type || '—', inline: true },
+                  { name: '제조사', value: item.manufacturer || '—', inline: true },
+                  { name: '상태', value: item.status || '—', inline: true },
+                  { name: '갱신 일자', value: item.update || '—', inline: true },
+                  { name: '비고', value: item.note || '—', inline: false }
+                ],
+                footer: { text: 'GEONWORKS · GB Schedule 알림 · 연결 재테스트' },
+                timestamp: new Date().toISOString()
+              }]
+            })
+          });
+
+          const body = await response.text();
+          if (!response.ok) throw new Error(`Discord webhook failed: ${response.status} ${body}`);
+          const message = body ? JSON.parse(body) : {};
+          console.log('DISCORD_STATUS', response.status);
+          console.log('DISCORD_MESSAGE_ID', message.id || 'none');
+          console.log('DISCORD_CHANNEL_ID', message.channel_id || 'none');
+          console.log('TEST_PRODUCT', item.product);
+          console.log('TEST_DATA', JSON.stringify(item));
+          NODE
