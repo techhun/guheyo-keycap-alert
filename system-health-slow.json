@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "initialized": true,
+  "updatedAt": "2026-09-16T12:50:00.000Z",
+  "sources": {
+    "geonworks-gb": {
+      "status": "ok",
+      "changedAt": "2026-09-16T12:50:00.000Z"
+    },
+    "geonworks-release": {
+      "status": "ok",
+      "changedAt": "2026-09-16T12:50:00.000Z"
+    },
+    "prototypist": {
+      "status": "ok",
+      "changedAt": "2026-09-16T12:50:00.000Z"
+    },
+    "swagkeys": {
+      "status": "ok",
+      "changedAt": "2026-09-16T12:50:00.000Z"
+    }
+  }
+}
