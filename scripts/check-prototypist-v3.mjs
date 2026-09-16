@@ -500,7 +500,9 @@ if (!DISCORD_WEBHOOK_URL) {
   process.exit(0);
 }
 
-await addDetailNotes(changes);
+await addDetailNotes(changes).catch((error) => {
+  console.warn(`Proto[Typist] detail lookups skipped: ${error?.message || error}`);
+});
 for (const change of changes) await notify(change);
 saveState(rows);
 console.log(`Sent ${changes.length} Proto[Typist] notification(s) and updated state.`);
