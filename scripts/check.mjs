@@ -26,7 +26,7 @@ function parseListing(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   const price = normalized.match(/([\d,]+\s*원)\s*$/)?.[1] || '';
   let title = normalized
-    .replace(/^(?:방금 전|하루 전|한 시간 전|\d+\s*(?:초|분|시간|일)\s*전)\s+/, '')
+    .replace(/^(?:방금\s*전|하루\s*전|한\s*시간\s*전|몇\s*(?:초|분|시간|일)\s*전|\d+\s*(?:초|분|시간|일)\s*전)\s+/, '')
     .replace(/\s+키캡\s+[\d,]+\s*원\s*$/, '')
     .trim();
   if (!title) title = '새 키캡 매물';
