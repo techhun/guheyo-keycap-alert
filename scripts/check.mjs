@@ -4,9 +4,11 @@ import crypto from 'node:crypto';
 
 const MARKET_URL = process.env.GUHEYO_URL || 'https://guheyo.com/g/keyboard/sell?category=keycap';
 const NTFY_TOPIC = (process.env.NTFY_TOPIC || '').trim();
+const DISCORD_WEBHOOK_URL = (process.env.DISCORD_WEBHOOK_URL || '').trim();
 const STATE_PATH = 'state.json';
 const MAX_SEEN = 300;
 const NTFY_CHUNK_BYTES = 2800;
+const DISCORD_DESCRIPTION_LIMIT = 3800;
 
 function hash(value) {
   return crypto.createHash('sha256').update(value).digest('hex').slice(0, 20);
@@ -59,6 +61,12 @@ function normalizeDetail(text) {
 
 function cleanMetaDescription(text) {
   return normalizeDetail(text).replace(/^[\d,]+\s*원\s*-\s*[^-]+?\s*-\s*/, '').trim();
+}
+
+function truncate(text, maxLength) {
+  const value = String(text || '');
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 async function fetchListingDetail(item) {
@@ -122,15 +130,15 @@ async function fetchListingDetail(item) {
   }
 }
 
-async function sendNotification(item) {
+async function sendNtfy(item) {
+  if (!NTFY_TOPIC) {
+    console.log('[ntfy] NTFY_TOPIC is not configured; skipping.');
+    return;
+  }
+
   const header = `${item.title}${item.price ? `\n${item.price}` : ''}`;
   const fullMessage = item.detail ? `${header}\n\n${item.detail}` : header;
   const chunks = splitUtf8(fullMessage);
-
-  if (!NTFY_TOPIC) {
-    console.log('[notify:dry-run]', fullMessage, item.url);
-    return;
-  }
 
   for (let i = 0; i < chunks.length; i += 1) {
     const response = await fetch('https://ntfy.sh', {
@@ -149,6 +157,54 @@ async function sendNotification(item) {
     if (!response.ok) {
       throw new Error(`ntfy failed: ${response.status} ${await response.text()}`);
     }
+  }
+}
+
+async function sendDiscord(item) {
+  if (!DISCORD_WEBHOOK_URL) {
+    console.log('[discord] DISCORD_WEBHOOK_URL is not configured; skipping.');
+    return;
+  }
+
+  const description = truncate(item.detail || '판매글 본문이 없습니다.', DISCORD_DESCRIPTION_LIMIT);
+  const response = await fetch(DISCORD_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'Guheyo Keycap Alert',
+      allowed_mentions: { parse: [] },
+      embeds: [
+        {
+          title: truncate(item.title, 256),
+          url: item.url,
+          description,
+          fields: item.price ? [{ name: '가격', value: item.price, inline: true }] : [],
+          footer: { text: '구해요 키캡 판매' },
+          timestamp: new Date().toISOString()
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+  }
+}
+
+async function sendNotification(item) {
+  if (!NTFY_TOPIC && !DISCORD_WEBHOOK_URL) {
+    console.log('[notify:dry-run]', item.title, item.price, item.detail, item.url);
+    return;
+  }
+
+  // 개인용 ntfy 알림은 기존처럼 필수로 유지한다. Discord는 추가 채널이므로
+  // 일시적인 Webhook 장애가 기존 감지 상태 저장을 막지 않도록 best-effort로 보낸다.
+  await sendNtfy(item);
+
+  try {
+    await sendDiscord(item);
+  } catch (error) {
+    console.warn('[discord] notification failed:', error?.message || error);
   }
 }
 
