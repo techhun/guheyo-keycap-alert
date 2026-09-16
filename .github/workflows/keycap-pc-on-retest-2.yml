@@ -1,0 +1,44 @@
+name: Keycap PC on retest 2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/keycap-pc-on-retest-2.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send keycap Discord test
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          const webhook = (process.env.WEBHOOK || '').trim();
+          if (!webhook) throw new Error('DISCORD_WEBHOOK_URL is not configured');
+
+          const sendUrl = new URL(webhook);
+          sendUrl.searchParams.set('wait', 'true');
+          const response = await fetch(sendUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'Guheyo Keycap Alert',
+              allowed_mentions: { parse: [] },
+              embeds: [{
+                title: '🆕 PC Discord 켠 상태 알림 재테스트 - 20',
+                description: 'PC Discord를 켠 상태에서도 모바일 푸시가 오는지 재확인하는 테스트입니다.',
+                footer: { text: '구해요 · 키캡 판매 알림' },
+                timestamp: new Date().toISOString()
+              }]
+            })
+          });
+
+          const body = await response.text();
+          if (!response.ok) throw new Error(`Discord failed: ${response.status} ${body}`);
+          const message = body ? JSON.parse(body) : {};
+          console.log('STATUS', response.status);
+          console.log('MESSAGE_ID', message.id || 'none');
+          console.log('CHANNEL_ID', message.channel_id || 'none');
+          NODE
