@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T02:35:59.699Z",
+  "updatedAt": "2026-09-16T03:05:47.729Z",
   "rows": [
     {
       "product": "Supernova",
@@ -100,8 +100,8 @@
       "type": "Keycap",
       "manufacturer": "GMK",
       "status": "In progress",
-      "update": "2026. 8. 24",
-      "note": "컬러 매칭중 / Matching colors"
+      "update": "2026. 9. 16",
+      "note": "컬러매칭 완료 / Color Matching Complete"
     },
     {
       "product": "LILY R2 HHKB Barebone Kit",
@@ -300,7 +300,7 @@
       "type": "Keycap",
       "manufacturer": "GMK",
       "status": "In progress",
-      "update": "2026. 9. 15",
+      "update": "2026. 9. 16",
       "note": "키캡 검수 완료. 데스크 매트 대기 중 / Keycap inspection complete. Waiting for the desk mat."
     },
     {
