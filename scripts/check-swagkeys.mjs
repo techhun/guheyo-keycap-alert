@@ -166,16 +166,21 @@ async function extractRoadmap(page) {
       if (quarters[quarter] === null || products.length > quarters[quarter].length) quarters[quarter] = products;
     }
 
-    if ((step + 1) % 16 === 0) {
-      await page.evaluate(() => {
-        const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+    const resetScroll = (step + 1) % 24 === 0;
+    const scrollState = await page.evaluate((shouldReset) => {
+      const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+      if (shouldReset) {
         scroller.scrollTop = 0;
-      });
-      await page.mouse.wheel(0, -10000);
-    } else {
-      await page.mouse.wheel(0, 900);
-    }
-    await page.waitForTimeout(650);
+      } else {
+        const distance = Math.max(900, Math.floor((scroller.clientHeight || window.innerHeight || 900) * 0.8));
+        scroller.scrollTop = Math.min(scroller.scrollTop + distance, scroller.scrollHeight);
+      }
+      return {
+        top: scroller.scrollTop,
+        max: Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      };
+    }, resetScroll);
+    await page.waitForTimeout(!resetScroll && scrollState.max > 0 && scrollState.top >= scrollState.max - 5 ? 1200 : 500);
   }
 
   if (!quarterSnapshotIsValid(quarters)) {
@@ -215,7 +220,13 @@ async function extractRows(page) {
   });
 }
 
-async function fetchSnapshot(fallbackRows = []) {
+async function fetchSnapshot(fallback = {}) {
+  const fallbackRows = Array.isArray(fallback.rows) ? fallback.rows : [];
+  const fallbackRoadmapIsValid = Boolean(
+    fallback.announcement?.heading
+    && fallback.announcement?.content
+    && quarterSnapshotIsValid(fallback.quarters)
+  );
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 1800, height: 1400 },
@@ -223,22 +234,53 @@ async function fetchSnapshot(fallbackRows = []) {
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
   });
   try {
-    const roadmap = await openWithRetry(context, ROADMAP_URL, 'roadmap', extractRoadmap);
-    let rows;
-    let statusFresh = true;
+    let roadmap = null;
+    let roadmapFresh = true;
+    let roadmapError = null;
     try {
-      rows = await openWithRetry(context, STATUS_URL, 'status table', extractRows);
+      const candidate = await openWithRetry(context, ROADMAP_URL, 'roadmap', extractRoadmap);
+      if (!candidate.announcement.heading || !candidate.announcement.content) throw new Error('roadmap announcement was empty');
+      if (!quarterSnapshotIsValid(candidate.quarters)) throw new Error('quarter roadmap snapshot failed validation');
+      if (Object.values(candidate.quarters).flat().length < 5) throw new Error('quarter roadmap returned too few products');
+      roadmap = candidate;
     } catch (error) {
-      if (!Array.isArray(fallbackRows) || fallbackRows.length < 10) throw error;
-      rows = fallbackRows;
-      statusFresh = false;
-      console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows for this run.`);
+      roadmapError = error;
+      roadmapFresh = false;
+      if (fallbackRoadmapIsValid) {
+        roadmap = { announcement: fallback.announcement, quarters: fallback.quarters };
+        console.warn('SWAGKEYS roadmap unavailable after retries. Reusing the stored verified roadmap for this run.');
+      }
     }
-    if (!roadmap.announcement.heading || !roadmap.announcement.content) throw new Error('roadmap announcement was empty');
-    if (!quarterSnapshotIsValid(roadmap.quarters)) throw new Error('quarter roadmap snapshot failed validation');
-    if (Object.values(roadmap.quarters).flat().length < 5) throw new Error('quarter roadmap returned too few products');
-    if (rows.length < 10) throw new Error(`status table returned too few rows: ${rows.length}`);
-    return { announcement: roadmap.announcement, quarters: roadmap.quarters, rows, statusFresh };
+
+    let rows = null;
+    let statusFresh = true;
+    let statusError = null;
+    try {
+      const candidateRows = await openWithRetry(context, STATUS_URL, 'status table', extractRows);
+      if (candidateRows.length < 10) throw new Error(`status table returned too few rows: ${candidateRows.length}`);
+      rows = candidateRows;
+    } catch (error) {
+      statusError = error;
+      statusFresh = false;
+      if (fallbackRows.length >= 10) {
+        rows = fallbackRows;
+        console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows for this run.`);
+      }
+    }
+
+    if (!roadmap) throw roadmapError || new Error('SWAGKEYS roadmap unavailable and no verified fallback exists');
+    if (!rows) throw statusError || new Error('SWAGKEYS status table unavailable and no verified fallback exists');
+    if (!roadmapFresh && !statusFresh) {
+      throw new Error(`SWAGKEYS roadmap and status table were both unavailable after retries. roadmap=${roadmapError?.message || 'unknown'}; status=${statusError?.message || 'unknown'}`);
+    }
+
+    return {
+      announcement: roadmap.announcement,
+      quarters: roadmap.quarters,
+      rows,
+      roadmapFresh,
+      statusFresh
+    };
   } finally {
     await context.close();
     await browser.close();
@@ -429,8 +471,9 @@ async function postDiscord(embed) {
 async function main() {
   const state = loadState();
   const previousRows = Array.isArray(state?.rows) ? state.rows : [];
-  let snapshot = await fetchSnapshot(previousRows);
-  console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}`);
+  const fallback = { announcement: state?.announcement, quarters: state?.quarters, rows: previousRows };
+  let snapshot = await fetchSnapshot(fallback);
+  console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}${snapshot.roadmapFresh ? '' : ' (stored fallback)'}`);
   console.log(`SWAGKEYS status rows: ${snapshot.rows.length}${snapshot.statusFresh ? '' : ' (stored fallback)'}`);
 
   if (!state?.initialized || previousRows.length === 0) {
@@ -469,7 +512,7 @@ async function main() {
   const firstRemovalSignature = removalSignature(calculated.quarterChanges, calculated.changes);
   if (firstRemovalSignature) {
     console.warn('SWAGKEYS removal detected; re-reading once before notifying.');
-    const verificationSnapshot = await fetchSnapshot(previousRows);
+    const verificationSnapshot = await fetchSnapshot(fallback);
     validateRows(verificationSnapshot);
     const verificationCalculated = calculateChanges(verificationSnapshot);
     const secondRemovalSignature = removalSignature(verificationCalculated.quarterChanges, verificationCalculated.changes);
