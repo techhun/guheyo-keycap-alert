@@ -59,15 +59,11 @@ async function extractRoadmap(page) {
   }
   await page.waitForFunction(() => {
     const note = document.querySelector('[role="note"]') || document.querySelector('.notion-callout-block');
-    const quarterBlocks = [...document.querySelectorAll('.notion-collection_view-block')]
-      .filter((block) => /^[1-4]분기\s*\(Q[1-4]\)/i.test((block.innerText || '').trim()));
-    return /업데이트\s*\(/.test(note?.innerText || '')
-      && quarterBlocks.length === 4
-      && quarterBlocks.every((block) => !/불러오는 중/.test(block.innerText || ''));
+    return /업데이트\s*\(/.test(note?.innerText || '');
   }, undefined, { timeout: 20000 });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(500);
 
-  return page.evaluate(() => {
+  const announcement = await page.evaluate(() => {
     const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
     const note = document.querySelector('[role="note"]') || document.querySelector('.notion-callout-block');
     const lines = tidy(note?.innerText)
@@ -75,24 +71,60 @@ async function extractRoadmap(page) {
       .map((line) => line.replace(/\s+/g, ' ').trim())
       .filter((line) => line && line !== '📌');
     const headingIndex = lines.findIndex((line) => /^업데이트\s*\(/.test(line));
-    const quarters = { Q1: [], Q2: [], Q3: [], Q4: [] };
-    for (const block of document.querySelectorAll('.notion-collection_view-block')) {
-      const blockLines = tidy(block.innerText)
-        .split('\n')
-        .map((line) => line.replace(/\s+/g, ' ').trim())
-        .filter(Boolean);
-      const match = blockLines[0]?.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
-      if (!match) continue;
-      quarters[`Q${match[1]}`] = blockLines.slice(1).filter((line) => line !== '결과 없음');
-    }
     return {
-      announcement: {
-        heading: headingIndex >= 0 ? lines[headingIndex] : '',
-        content: lines.slice(headingIndex >= 0 ? headingIndex + 1 : 0).join('\n')
-      },
-      quarters
+      heading: headingIndex >= 0 ? lines[headingIndex] : '',
+      content: lines.slice(headingIndex >= 0 ? headingIndex + 1 : 0).join('\n')
     };
   });
+
+  const quarters = { Q1: null, Q2: null, Q3: null, Q4: null };
+  await page.evaluate(() => {
+    const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+    scroller.scrollTop = 0;
+  });
+
+  for (let step = 0; step < 60 && Object.values(quarters).some((value) => value === null); step += 1) {
+    const found = await page.evaluate(() => {
+      const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
+      const result = {};
+      for (const block of document.querySelectorAll('.notion-collection_view-block')) {
+        const blockLines = tidy(block.innerText)
+          .split('\n')
+          .map((line) => line.replace(/\s+/g, ' ').trim())
+          .filter(Boolean);
+        const match = blockLines[0]?.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
+        if (!match || blockLines.some((line) => /불러오는 중/.test(line))) continue;
+        result[`Q${match[1]}`] = blockLines.slice(1).filter((line) => line !== '결과 없음');
+      }
+      return result;
+    });
+
+    for (const [quarter, products] of Object.entries(found)) {
+      if (quarters[quarter] === null) quarters[quarter] = products;
+    }
+    if (Object.values(quarters).every((value) => value !== null)) break;
+
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+      const distance = Math.max(Math.floor((scroller.clientHeight || window.innerHeight) * 0.75), 700);
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (scroller.scrollTop >= maxScrollTop - 5) {
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.floor(distance * 0.4));
+      } else {
+        scroller.scrollTop = Math.min(maxScrollTop, scroller.scrollTop + distance);
+      }
+    });
+    await page.waitForTimeout(500);
+  }
+
+  const missingQuarters = Object.entries(quarters)
+    .filter(([, products]) => products === null)
+    .map(([quarter]) => quarter);
+  if (missingQuarters.length) {
+    throw new Error(`quarter roadmap incomplete after progressive loading: ${missingQuarters.join(', ')}`);
+  }
+
+  return { announcement, quarters };
 }
 
 async function extractRows(page) {
