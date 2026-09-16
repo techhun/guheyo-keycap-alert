@@ -7,8 +7,8 @@ const TARGET_NAME = '떴냐';
 const MOBILE_URL = 'https://m.dcinside.com/board/mechanicalkeyboard?headid=110';
 const DESKTOP_URL = 'https://gall.dcinside.com/mgallery/board/lists/?id=mechanicalkeyboard&search_head=110&page=1';
 const SOURCES = [
-  { id: 'mobile', url: MOBILE_URL, expectedQuery: 'headid=110' },
-  { id: 'desktop', url: DESKTOP_URL, expectedQuery: 'search_head=110' }
+  { id: 'desktop', url: DESKTOP_URL, expectedQuery: 'search_head=110' },
+  { id: 'mobile', url: MOBILE_URL, expectedQuery: 'headid=110' }
 ];
 
 const clean = (value) => String(value ?? '')
