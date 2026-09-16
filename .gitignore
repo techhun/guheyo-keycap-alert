@@ -1,0 +1,13 @@
+node_modules/
+
+# Local secrets / runtime configuration
+.env
+.env.*
+!.env.restock.example
+
+# Persistent browser profiles may contain login/session data
+.restock-browser/
+restock-browser-profile/
+
+# Local logs/runtime files
+*.log
