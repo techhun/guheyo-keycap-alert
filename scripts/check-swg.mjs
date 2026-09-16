@@ -6,6 +6,7 @@ const STATE_PATH = 'swg-state.json';
 const DISCORD_WEBHOOK_URL = (process.env.SWG_DISCORD_WEBHOOK_URL || '').trim();
 const ROADMAP_URL = 'https://swagkeys.notion.site/swg-keycap-roadmap';
 const STATUS_URL = 'https://swagkeys.notion.site/3b5f75d536018064b051e6a663b41d35?v=c68f75d5360182a89e8588a1aec3a749';
+const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
 const STAGES = [
   { key: 'groupBuy', label: '공제' },
   { key: 'waitingProduction', label: '생산 대기' },
@@ -28,9 +29,17 @@ const truncate = (value, maxLength = 1000) => {
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const INVALID_ROADMAP_RE = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
+const isInvalidRoadmapValue = (value) => INVALID_ROADMAP_RE.test(clean(value));
+const quarterSnapshotIsValid = (quarters) => QUARTERS.every((quarter) => {
+  const products = quarters?.[quarter];
+  return Array.isArray(products)
+    && products.length > 0
+    && products.every((product) => clean(product) && !isInvalidRoadmapValue(product));
+});
+
 async function openWithRetry(context, url, label, extractor) {
   let lastError;
-
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const page = await context.newPage();
     try {
@@ -48,7 +57,6 @@ async function openWithRetry(context, url, label, extractor) {
       await page.close();
     }
   }
-
   throw lastError;
 }
 
@@ -85,18 +93,24 @@ async function extractRoadmap(page) {
   });
   await page.waitForTimeout(700);
 
-  for (let step = 0; step < 48 && Object.values(quarters).some((value) => value === null); step += 1) {
+  for (let step = 0; step < 64 && Object.values(quarters).some((value) => value === null); step += 1) {
     const found = await page.evaluate(() => {
       const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
+      const invalid = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
       const result = {};
+
       for (const block of document.querySelectorAll('.notion-collection_view-block')) {
         const blockLines = tidy(block.innerText)
           .split('\n')
           .map((line) => line.replace(/\s+/g, ' ').trim())
           .filter(Boolean);
         const match = blockLines[0]?.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
-        if (!match || blockLines.some((line) => /불러오는 중/.test(line))) continue;
-        const products = blockLines.slice(1).filter((line) => line !== '결과 없음');
+        if (!match) continue;
+
+        const bodyLines = blockLines.slice(1);
+        if (bodyLines.some((line) => invalid.test(line))) continue;
+
+        const products = [...new Set(bodyLines.filter((line) => line && !invalid.test(line)))];
         if (products.length > 0) result[`Q${match[1]}`] = products;
       }
       return result;
@@ -105,7 +119,7 @@ async function extractRoadmap(page) {
     for (const [quarter, products] of Object.entries(found)) {
       if (quarters[quarter] === null || products.length > quarters[quarter].length) quarters[quarter] = products;
     }
-    if (Object.values(quarters).every((value) => Array.isArray(value) && value.length > 0)) break;
+    if (quarterSnapshotIsValid(quarters)) break;
 
     if ((step + 1) % 16 === 0) {
       await page.evaluate(() => {
@@ -119,11 +133,9 @@ async function extractRoadmap(page) {
     await page.waitForTimeout(650);
   }
 
-  const missingQuarters = Object.entries(quarters)
-    .filter(([, products]) => !Array.isArray(products) || products.length === 0)
-    .map(([quarter]) => quarter);
-  if (missingQuarters.length) {
-    throw new Error(`quarter roadmap incomplete after progressive loading: ${missingQuarters.join(', ')}`);
+  if (!quarterSnapshotIsValid(quarters)) {
+    const missing = QUARTERS.filter((quarter) => !Array.isArray(quarters[quarter]) || quarters[quarter].length === 0);
+    throw new Error(`quarter roadmap incomplete or contains Notion error placeholders: ${missing.length ? missing.join(', ') : 'invalid values'}`);
   }
 
   console.log(`SWAGKEYS quarter counts: ${Object.entries(quarters).map(([quarter, products]) => `${quarter}=${products.length}`).join(', ')}`);
@@ -133,19 +145,15 @@ async function extractRoadmap(page) {
 async function extractRows(page) {
   await page.waitForFunction(() => document.querySelectorAll('.notion-table-view-row').length >= 10, undefined, { timeout: 25000 });
   await page.waitForTimeout(1000);
-
   return page.evaluate(() => {
     const tidy = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
     const progress = (cells, index) => {
       const value = Number(cells.get(index)?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'));
       return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
     };
-
     return [...document.querySelectorAll('.notion-table-view-row')].map((row) => {
-      const cells = new Map(
-        [...row.querySelectorAll('.notion-table-view-cell')]
-          .map((cell) => [Number(cell.getAttribute('data-col-index')), cell])
-      );
+      const cells = new Map([...row.querySelectorAll('.notion-table-view-cell')]
+        .map((cell) => [Number(cell.getAttribute('data-col-index')), cell]));
       return {
         product: tidy(cells.get(0)?.innerText),
         groupBuy: progress(cells, 1),
@@ -169,7 +177,6 @@ async function fetchSnapshot(fallbackRows = []) {
     locale: 'ko-KR',
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
   });
-
   try {
     const roadmap = await openWithRetry(context, ROADMAP_URL, 'roadmap', extractRoadmap);
     let rows;
@@ -183,6 +190,7 @@ async function fetchSnapshot(fallbackRows = []) {
       console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows for this run.`);
     }
     if (!roadmap.announcement.heading || !roadmap.announcement.content) throw new Error('roadmap announcement was empty');
+    if (!quarterSnapshotIsValid(roadmap.quarters)) throw new Error('quarter roadmap snapshot failed validation');
     if (Object.values(roadmap.quarters).flat().length < 5) throw new Error('quarter roadmap returned too few products');
     if (rows.length < 10) throw new Error(`status table returned too few rows: ${rows.length}`);
     return { announcement: roadmap.announcement, quarters: roadmap.quarters, rows, statusFresh };
@@ -226,24 +234,17 @@ function diffRows(previousRows, currentRows) {
     { key: 'eta', label: '배송 예정일' },
     { key: 'currentStatus', label: '현재 상태' }
   ];
-
   for (const [key, row] of current) {
     const before = previous.get(key);
     if (!before) {
       changes.push({ kind: 'added', row });
       continue;
     }
-
     const changedFields = fields
       .filter((field) => clean(before[field.key]) !== clean(row[field.key]))
-      .map((field) => ({
-        ...field,
-        before: before[field.key],
-        after: row[field.key]
-      }));
+      .map((field) => ({ ...field, before: before[field.key], after: row[field.key] }));
     if (changedFields.length) changes.push({ kind: 'changed', row, before, fields: changedFields });
   }
-
   for (const [key, row] of previous) {
     if (!current.has(key)) changes.push({ kind: 'removed', row });
   }
@@ -253,7 +254,7 @@ function diffRows(previousRows, currentRows) {
 export function diffQuarters(previousQuarters = {}, currentQuarters = {}) {
   const locations = (quarters) => {
     const map = new Map();
-    for (const quarter of ['Q1', 'Q2', 'Q3', 'Q4']) {
+    for (const quarter of QUARTERS) {
       for (const product of quarters[quarter] || []) {
         map.set(clean(product).toLowerCase(), { product: clean(product), quarter });
       }
@@ -263,13 +264,10 @@ export function diffQuarters(previousQuarters = {}, currentQuarters = {}) {
   const previous = locations(previousQuarters);
   const current = locations(currentQuarters);
   const result = { moved: [], added: [], removed: [] };
-
   for (const [key, item] of current) {
     const before = previous.get(key);
     if (!before) result.added.push(item);
-    else if (before.quarter !== item.quarter) {
-      result.moved.push({ product: item.product, before: before.quarter, after: item.quarter });
-    }
+    else if (before.quarter !== item.quarter) result.moved.push({ product: item.product, before: before.quarter, after: item.quarter });
   }
   for (const [key, item] of previous) {
     if (!current.has(key)) result.removed.push(item);
@@ -293,21 +291,14 @@ function formatKst(isoString) {
 function displayPercent(value) {
   return `${Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
 }
-
 function auxiliaryFields(url, detectedAt) {
   return [
     { name: '변경 감지 시각', value: `${formatKst(detectedAt)} KST`, inline: false },
     { name: '링크', value: `[🔗 상세 보기](${url})`, inline: false }
   ];
 }
-
 function baseEmbed(title, url, detectedAt) {
-  return {
-    title: truncate(title, 250),
-    url,
-    footer: { text: 'SWAGKEYS · Keycap Roadmap' },
-    timestamp: detectedAt
-  };
+  return { title: truncate(title, 250), url, footer: { text: 'SWAGKEYS · Keycap Roadmap' }, timestamp: detectedAt };
 }
 
 export function announcementEmbed(announcement, detectedAt = new Date().toISOString()) {
@@ -321,35 +312,11 @@ export function announcementEmbed(announcement, detectedAt = new Date().toISOStr
 }
 
 export function quartersEmbed(changes, detectedAt = new Date().toISOString()) {
-  const changedFields = [];
-  if (changes.moved.length) {
-    changedFields.push({
-      name: '분기 이동',
-      value: truncate(changes.moved.map((item) => `• ${item.product}: ${item.before} → ${item.after}`).join('\n')),
-      inline: false
-    });
-  }
-  if (changes.added.length) {
-    changedFields.push({
-      name: '신규 배치',
-      value: truncate(changes.added.map((item) => `• ${item.product} → ${item.quarter}`).join('\n')),
-      inline: false
-    });
-  }
-  if (changes.removed.length) {
-    changedFields.push({
-      name: '로드맵 제외',
-      value: truncate(changes.removed.map((item) => `• ${item.product} (기존 ${item.quarter})`).join('\n')),
-      inline: false
-    });
-  }
-  return {
-    ...baseEmbed('🗺️ SWAGKEYS 분기별 로드맵 업데이트', ROADMAP_URL, detectedAt),
-    fields: [
-      ...changedFields,
-      ...auxiliaryFields(ROADMAP_URL, detectedAt)
-    ]
-  };
+  const fields = [];
+  if (changes.moved.length) fields.push({ name: '분기 이동', value: truncate(changes.moved.map((item) => `• ${item.product}: ${item.before} → ${item.after}`).join('\n')), inline: false });
+  if (changes.added.length) fields.push({ name: '신규 배치', value: truncate(changes.added.map((item) => `• ${item.product} → ${item.quarter}`).join('\n')), inline: false });
+  if (changes.removed.length) fields.push({ name: '로드맵 제외', value: truncate(changes.removed.map((item) => `• ${item.product} (기존 ${item.quarter})`).join('\n')), inline: false });
+  return { ...baseEmbed('🗺️ SWAGKEYS 분기별 로드맵 업데이트', ROADMAP_URL, detectedAt), fields: [...fields, ...auxiliaryFields(ROADMAP_URL, detectedAt)] };
 }
 
 export function addedEmbed(row, detectedAt = new Date().toISOString()) {
@@ -397,11 +364,7 @@ async function postDiscord(embed) {
     const response = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: 'SWAGKEYS Updates',
-        allowed_mentions: { parse: [] },
-        embeds: [embed]
-      })
+      body: JSON.stringify({ username: 'SWAGKEYS Updates', allowed_mentions: { parse: [] }, embeds: [embed] })
     });
     if (response.ok) return;
     if (response.status === 429 && attempt < 3) {
@@ -427,9 +390,8 @@ async function main() {
     return;
   }
 
-  const storedQuarterValues = Object.values(state.quarters || {}).flat();
-  if (storedQuarterValues.some((value) => /불러오는 중/.test(clean(value)))) {
-    console.warn('Stored SWAGKEYS quarter roadmap was incomplete. Replacing it with a verified snapshot without notifying.');
+  if (!quarterSnapshotIsValid(state.quarters)) {
+    console.warn('Stored SWAGKEYS quarter roadmap was incomplete or polluted by Notion error placeholders. Replacing it with a verified snapshot without notifying.');
     saveState(snapshot);
     return;
   }
