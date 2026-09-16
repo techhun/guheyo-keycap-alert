@@ -35,6 +35,7 @@ jobs:
       - name: Check Guheyo keycap listings
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run check
 
       - name: Persist watcher state
