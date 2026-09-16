@@ -1,11 +1,7 @@
 name: Keyboard alerts (slow)
-# Final validation trigger; remove the temporary push trigger after this run.
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/keyboard-alert-slow.yml'
 
 permissions:
   contents: write
