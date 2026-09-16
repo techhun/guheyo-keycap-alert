@@ -1,45 +1,35 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T06:59:15.546Z",
+  "updatedAt": "2026-09-16T07:02:27.142Z",
   "announcement": {
     "heading": "업데이트(26.09.08)",
     "content": "SWG Bolch 실사가 추가되었습니다. / SWG Bolch photos have been added.\n프로젝트 진행 상황 페이지가 업데이트 되었습니다. 전반적인 로고들이 재작업 후 업데이트 되었습니다. / Keycap Status Page has been updated. New Logos have been updated."
   },
   "quarters": {
     "Q1": [
-      "SWG Beige",
-      "SWG Rubber",
-      "SWG Nimbus",
-      "SWG Euler",
-      "SWG Prepress",
-      "SWG Classic Red"
+      "불러오는 중..."
     ],
     "Q2": [
-      "SWG Ferrofluid",
-      "SWG Classic Blue",
-      "SWG Skeletoon",
-      "SWG Rainbow Alert",
-      "SWG Salmon",
-      "SWG TARS",
-      "SWG Midnight Rainbow"
+      "불러오는 중..."
     ],
     "Q3": [
-      "SWG Neowell",
-      "SWG Nerve",
-      "SWG Heartbreaker",
-      "SWG Hazakura Light",
-      "SWG Evil Eye",
-      "SWG Hypermix",
-      "SWG Lavender",
-      "SWG Feralis",
-      "SWG Art",
-      "SWG Bolch (국내 인스탁 판매)",
-      "SWG x ??????",
-      "SWG Parkway",
-      "SWG WoB (In-Stock)"
+      "불러오는 중..."
     ],
-    "Q4": []
+    "Q4": [
+      "SWG Space Cadet",
+      "SWG Crimson Cadet",
+      "SWG Nightshift",
+      "SWG Retroguardia",
+      "SWG Retro Red Light",
+      "SWG Koyo",
+      "SWS Soware",
+      "SWS FAN U.C",
+      "SWG 9o_o9",
+      "SWG Meadow",
+      "SWS Beige",
+      "SWS WoB"
+    ]
   },
   "rows": [
     {
