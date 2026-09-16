@@ -1,0 +1,57 @@
+name: GEONWORKS Release Discord test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/geonworks-release-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send GEONWORKS Release test
+        env:
+          WEBHOOK: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          const webhook = (process.env.WEBHOOK || '').trim();
+          if (!webhook) throw new Error('GEONWORKS_DISCORD_WEBHOOK_URL is not configured');
+
+          const url = new URL(webhook);
+          url.searchParams.set('wait', 'true');
+
+          const embed = {
+            title: '📅 출시 일정 추가 · SENSY Supernova',
+            url: 'https://geonworks.kr/customhtml/release/release.html',
+            fields: [
+              { name: '제조사', value: 'SENSY', inline: true },
+              { name: '지역', value: 'KR/GLOBAL', inline: true },
+              { name: '판매 방식', value: 'Group Buy', inline: true },
+              { name: '분류', value: 'Keyboard', inline: true },
+              { name: '상태', value: 'For Sale', inline: true },
+              { name: '판매 확정', value: '확정 / Fixed', inline: true },
+              { name: '판매 시작일', value: '2026-08-20', inline: true },
+              { name: '판매 종료일', value: '2026-09-17', inline: true }
+            ],
+            footer: { text: 'GEONWORKS · Release 알림 · 테스트' },
+            timestamp: new Date().toISOString()
+          };
+
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: 'GEONWORKS Alert',
+              allowed_mentions: { parse: [] },
+              embeds: [embed]
+            })
+          });
+
+          const body = await response.text();
+          if (!response.ok) throw new Error(`Discord failed: ${response.status} ${body}`);
+          const message = body ? JSON.parse(body) : {};
+          console.log('STATUS', response.status);
+          console.log('MESSAGE_ID', message.id || 'none');
+          console.log('CHANNEL_ID', message.channel_id || 'none');
+          NODE
