@@ -1,4 +1,5 @@
 name: Keyboard alerts (slow)
+# Final validation trigger; remove the temporary push trigger after this run.
 
 on:
   workflow_dispatch:
