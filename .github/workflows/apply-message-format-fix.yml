@@ -45,27 +45,17 @@ jobs:
           proto_old = """const truncate = (value, maxLength = 1000) => {\n  const text = clean(value) || '—';\n  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;\n};"""
           proto_new = """const truncate = (value, maxLength = 1000) => {\n  const text = String(value ?? '')\n    .replace(/\\r/g, '')\n    .split('\\n')\n    .map(clean)\n    .filter(Boolean)\n    .join('\\n') || '—';\n  return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;\n};"""
           replace_once('scripts/check-prototypist-v3.mjs', proto_old, proto_new)
-
-          for path in ['scripts/check-prototypist-v3.mjs', 'scripts/check-swg.mjs']:
-              p = Path(path)
-              text = p.read_text()
-              old = "\\\n현재:"
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected exactly 1 line-continuation match, found {count}')
-              p.write_text(text.replace(old, "\\n현재:", 1))
           PY
 
           node --check scripts/check-geonworks.mjs
           node --check scripts/check-geonworks-release.mjs
           node --check scripts/check-prototypist-v3.mjs
-          node --check scripts/check-swg.mjs
 
       - name: Commit fixes
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/check-geonworks.mjs scripts/check-geonworks-release.mjs scripts/check-prototypist-v3.mjs scripts/check-swg.mjs
+          git add scripts/check-geonworks.mjs scripts/check-geonworks-release.mjs scripts/check-prototypist-v3.mjs
           git commit -m 'Improve previous/current notification readability'
           git push origin main
