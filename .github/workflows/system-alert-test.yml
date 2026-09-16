@@ -1,0 +1,23 @@
+name: System alert test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/system-alert-test.yml'
+
+jobs:
+  test-system-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Send system test alert
+        env:
+          SYSTEM_DISCORD_WEBHOOK_URL: ${{ secrets.SYSTEM_DISCORD_WEBHOOK_URL }}
+        run: node scripts/system-health.mjs incident '시스템 알림 테스트' 'SYSTEM_DISCORD_WEBHOOK_URL 연결이 정상입니다.'
