@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T08:19:41.892Z",
+  "updatedAt": "2026-09-16T09:16:01.458Z",
   "rows": [
     {
       "product": "GMK DIVINAPAPAYA",
@@ -21,16 +21,6 @@
       "manufacturer": "SENSY",
       "status": "GB on sale",
       "update": "2026. 9. 16",
-      "note": "—"
-    },
-    {
-      "product": "Keykobo Cobalt",
-      "gbStart": "2026. 8. 31",
-      "eta": "2027. 3. 31",
-      "type": "Keycap",
-      "manufacturer": "KEYKOBO",
-      "status": "GB on sale",
-      "update": "2026. 8. 31",
       "note": "—"
     },
     {
