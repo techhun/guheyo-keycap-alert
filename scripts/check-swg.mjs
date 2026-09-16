@@ -93,7 +93,10 @@ async function extractRoadmap(page) {
   });
   await page.waitForTimeout(700);
 
-  for (let step = 0; step < 72 && Object.values(quarters).some((value) => value === null); step += 1) {
+  // Notion virtualizes collection views. Even after every quarter has at least one
+  // visible row, that can still be only a partial viewport. Scan the whole page
+  // repeatedly and retain the longest clean list observed for each quarter.
+  for (let step = 0; step < 72; step += 1) {
     const found = await page.evaluate(() => {
       const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
       const invalid = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
@@ -124,7 +127,6 @@ async function extractRoadmap(page) {
     for (const [quarter, products] of Object.entries(found)) {
       if (quarters[quarter] === null || products.length > quarters[quarter].length) quarters[quarter] = products;
     }
-    if (quarterSnapshotIsValid(quarters)) break;
 
     if ((step + 1) % 16 === 0) {
       await page.evaluate(() => {
