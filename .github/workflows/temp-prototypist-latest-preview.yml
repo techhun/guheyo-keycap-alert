@@ -1,0 +1,91 @@
+name: Temporary ProtoTypist latest pattern preview
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-prototypist-latest-preview.yml'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund
+      - name: Send latest items with production embeds
+        env:
+          PROTOTYPIST_DISCORD_WEBHOOK_URL: ${{ secrets.PROTOTYPIST_DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { chromium } from 'playwright';
+          import {
+            addedEmbed,
+            changedEmbed,
+            removedEmbed,
+            postDiscord
+          } from './scripts/check-prototypist-v3.mjs';
+
+          const state = JSON.parse(fs.readFileSync('prototypist-state.json', 'utf8'));
+          const first = (sourceId) => state.rows.find((row) => row.sourceId === sourceId);
+          const added = first('keyboard');
+          const changed = first('gmk');
+          const removed = first('keyset');
+          if (!added || !changed || !removed) throw new Error('Latest sample rows were not found.');
+
+          const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+          const context = await browser.newContext({
+            viewport: { width: 1400, height: 1000 },
+            locale: 'en-GB',
+            userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+          });
+
+          const detail = async (row) => {
+            const page = await context.newPage();
+            try {
+              await page.goto(row.itemUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
+              await page.waitForTimeout(800);
+              return await page.evaluate((product) => {
+                const clean = (value) => String(value ?? '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
+                const root = document.querySelector('.notion-page-content') || document.querySelector('main') || document.body;
+                const ignored = new Set([
+                  clean(product), 'In Group Buy', 'In Manufacturing', 'Shipping to Prototypist',
+                  'In Quality Control', 'Shipping to Customers', 'Completed',
+                  'Expected Shipping', 'Estimated Shipping', 'Status', 'Updates', 'Update'
+                ].map((value) => value.toLowerCase()));
+                const lines = clean(root?.innerText).split('\n').map(clean).filter(Boolean)
+                  .filter((line) => !ignored.has(line.toLowerCase()))
+                  .filter((line) => !/^https?:\/\//i.test(line))
+                  .filter((line) => !/^(early |late )?q[1-4](\s*-\s*q[1-4])?(\s+\d{4})?$/i.test(line))
+                  .filter((line) => !/^all batches tbc$/i.test(line));
+                return [...new Set(lines)].filter((line) => line.length >= 12).slice(0, 12).join('\n');
+              }, row.product);
+            } catch (error) {
+              console.warn(`Detail skipped for ${row.product}: ${error.message}`);
+              return '';
+            } finally {
+              await page.close();
+            }
+          };
+
+          const [addedDetail, changedDetail, removedDetail] = await Promise.all([
+            detail(added), detail(changed), detail(removed)
+          ]);
+          await context.close();
+          await browser.close();
+
+          await postDiscord(addedEmbed(added, addedDetail));
+          await postDiscord(changedEmbed({
+            row: changed,
+            detailNote: changedDetail,
+            fields: [
+              { label: '상태', before: 'In Manufacturing', after: changed.status },
+              { label: '예상 고객 배송', before: 'TBC', after: changed.expectedShipping || '—' }
+            ]
+          }));
+          await postDiscord(removedEmbed(removed, removedDetail));
+          console.log(`Sent latest previews: added=${added.product}, changed=${changed.product}, removed=${removed.product}`);
+          NODE
