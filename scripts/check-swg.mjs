@@ -78,12 +78,14 @@ async function extractRoadmap(page) {
   });
 
   const quarters = { Q1: null, Q2: null, Q3: null, Q4: null };
+  await page.mouse.move(900, 700);
   await page.evaluate(() => {
     const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
     scroller.scrollTop = 0;
   });
+  await page.waitForTimeout(700);
 
-  for (let step = 0; step < 60 && Object.values(quarters).some((value) => value === null); step += 1) {
+  for (let step = 0; step < 48 && Object.values(quarters).some((value) => value === null); step += 1) {
     const found = await page.evaluate(() => {
       const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
       const result = {};
@@ -94,36 +96,37 @@ async function extractRoadmap(page) {
           .filter(Boolean);
         const match = blockLines[0]?.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
         if (!match || blockLines.some((line) => /불러오는 중/.test(line))) continue;
-        result[`Q${match[1]}`] = blockLines.slice(1).filter((line) => line !== '결과 없음');
+        const products = blockLines.slice(1).filter((line) => line !== '결과 없음');
+        if (products.length > 0) result[`Q${match[1]}`] = products;
       }
       return result;
     });
 
     for (const [quarter, products] of Object.entries(found)) {
-      if (quarters[quarter] === null) quarters[quarter] = products;
+      if (quarters[quarter] === null || products.length > quarters[quarter].length) quarters[quarter] = products;
     }
-    if (Object.values(quarters).every((value) => value !== null)) break;
+    if (Object.values(quarters).every((value) => Array.isArray(value) && value.length > 0)) break;
 
-    await page.evaluate(() => {
-      const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
-      const distance = Math.max(Math.floor((scroller.clientHeight || window.innerHeight) * 0.75), 700);
-      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      if (scroller.scrollTop >= maxScrollTop - 5) {
-        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.floor(distance * 0.4));
-      } else {
-        scroller.scrollTop = Math.min(maxScrollTop, scroller.scrollTop + distance);
-      }
-    });
-    await page.waitForTimeout(500);
+    if ((step + 1) % 16 === 0) {
+      await page.evaluate(() => {
+        const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+        scroller.scrollTop = 0;
+      });
+      await page.mouse.wheel(0, -10000);
+    } else {
+      await page.mouse.wheel(0, 900);
+    }
+    await page.waitForTimeout(650);
   }
 
   const missingQuarters = Object.entries(quarters)
-    .filter(([, products]) => products === null)
+    .filter(([, products]) => !Array.isArray(products) || products.length === 0)
     .map(([quarter]) => quarter);
   if (missingQuarters.length) {
     throw new Error(`quarter roadmap incomplete after progressive loading: ${missingQuarters.join(', ')}`);
   }
 
+  console.log(`SWAGKEYS quarter counts: ${Object.entries(quarters).map(([quarter, products]) => `${quarter}=${products.length}`).join(', ')}`);
   return { announcement, quarters };
 }
 
