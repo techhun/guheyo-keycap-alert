@@ -72,6 +72,7 @@ async function extractRows(page, source) {
       const container = anchor.closest('li, tr, article, .ub-content') || anchor.parentElement;
       const category = tidy(container?.querySelector('.gall_subject, .subject_head, [class*="subject_head"], [class*="category"]')?.textContent);
       if (/공지|설문|AD|광고/i.test(category)) continue;
+      if (category && !/떴냐/i.test(category)) continue;
 
       const explicitTitle = tidy(
         anchor.querySelector('.subjectin, .title, .tit')?.textContent
@@ -115,6 +116,13 @@ async function extractRows(page, source) {
 
   if (!result.bodyHasTarget) throw new Error(`DCInside ${source.id} page did not contain the ${TARGET_NAME} tab label`);
   if (result.rows.length < 1) throw new Error(`DCInside ${source.id} returned no post rows`);
+
+  if (source.id === 'desktop') {
+    const invalidRows = result.rows.filter((row) => !/떴냐/i.test(clean(row.category)));
+    if (invalidRows.length > 0) {
+      throw new Error(`DCInside desktop returned ${invalidRows.length} row(s) without the ${TARGET_NAME} category; state was not updated.`);
+    }
+  }
 
   console.log(`DCInside ${TARGET_NAME} source: ${source.id}`);
   console.log(`DCInside ${TARGET_NAME} rows: ${result.rows.length}`);
