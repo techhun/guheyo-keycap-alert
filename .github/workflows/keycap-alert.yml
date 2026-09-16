@@ -41,6 +41,23 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: npm run check
 
+      - name: Check DCInside tteotnya posts
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if npm run check:dcinside; then
+            exit 0
+          fi
+
+          echo 'DCInside read failed once; retrying...'
+          if npm run check:dcinside; then
+            exit 0
+          fi
+
+          echo 'DCInside is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+
       - name: Check GEONWORKS GB schedule
         if: always()
         env:
@@ -82,7 +99,7 @@ jobs:
         run: |
           changed_files=()
 
-          for file in state.json geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json; do
+          for file in state.json dcinside-tteotnya-state.json geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json; do
             if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
               changed_files+=("$file")
             fi
