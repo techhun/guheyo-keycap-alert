@@ -18,86 +18,10 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Normalize SWAGKEYS ETA comparisons
+      - name: Patch and validate SWAGKEYS watcher
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/check-swagkeys.mjs')
-          text = path.read_text()
-
-          marker = "const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));\n"
-          helper = r'''
-
-const ENGLISH_MONTHS = new Map([
-  ['january', 1], ['february', 2], ['march', 3], ['april', 4], ['may', 5], ['june', 6],
-  ['july', 7], ['august', 8], ['september', 9], ['october', 10], ['november', 11], ['december', 12]
-]);
-
-function canonicalDate(year, month, day) {
-  const y = Number(year);
-  const m = Number(month);
-  const d = Number(day);
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)
-      || y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return '';
-  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-}
-
-function normalizeEta(value) {
-  const text = clean(value);
-  if (!text) return '';
-
-  let match = text.match(/^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일$/);
-  if (match) return canonicalDate(match[1], match[2], match[3]) || text;
-
-  match = text.match(/^(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})\.?$/);
-  if (match) return canonicalDate(match[1], match[2], match[3]) || text;
-
-  match = text.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
-  if (match) {
-    const month = ENGLISH_MONTHS.get(match[1].toLowerCase());
-    if (month) return canonicalDate(match[3], month, match[2]) || text;
-  }
-
-  return text;
-}
-
-function comparableFieldValue(fieldKey, value) {
-  return fieldKey === 'eta' ? normalizeEta(value) : clean(value);
-}
-'''
-
-          if 'function normalizeEta(value)' not in text:
-              if marker not in text:
-                  raise SystemExit('helper insertion marker not found')
-              text = text.replace(marker, marker + helper, 1)
-
-          old = """    const changedFields = fields
-      .filter((field) => clean(before[field.key]) !== clean(row[field.key]))
-      .map((field) => ({ ...field, before: before[field.key], after: row[field.key] }));
-"""
-          new = """    const changedFields = fields
-      .filter((field) => comparableFieldValue(field.key, before[field.key]) !== comparableFieldValue(field.key, row[field.key]))
-      .map((field) => ({
-        ...field,
-        before: field.key === 'eta' ? normalizeEta(before[field.key]) : before[field.key],
-        after: field.key === 'eta' ? normalizeEta(row[field.key]) : row[field.key]
-      }));
-"""
-          if old not in text:
-              raise SystemExit('diffRows comparison block not found')
-          text = text.replace(old, new, 1)
-
-          old_save = "    rows: snapshot.rows\n"
-          new_save = "    rows: snapshot.rows.map((row) => ({ ...row, eta: normalizeEta(row.eta) }))\n"
-          if old_save not in text:
-              raise SystemExit('saveState rows block not found')
-          text = text.replace(old_save, new_save, 1)
-
-          path.write_text(text)
-          PY
-
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpwYXRoID0gUGF0aCgic2NyaXB0cy9jaGVjay1zd2Fna2V5cy5tanMiKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoKQoKbWFya2VyID0gImNvbnN0IHNsZWVwID0gKG1zKSA9PiBuZXcgUHJvbWlzZSgocmVzb2x2ZSkgPT4gc2V0VGltZW91dChyZXNvbHZlLCBtcykpO1xuIgpoZWxwZXIgPSByIiIiCgpjb25zdCBFTkdMSVNIX01PTlRIUyA9IG5ldyBNYXAoWwogIFsnamFudWFyeScsIDFdLCBbJ2ZlYnJ1YXJ5JywgMl0sIFsnbWFyY2gnLCAzXSwgWydhcHJpbCcsIDRdLCBbJ21heScsIDVdLCBbJ2p1bmUnLCA2XSwKICBbJ2p1bHknLCA3XSwgWydhdWd1c3QnLCA4XSwgWydzZXB0ZW1iZXInLCA5XSwgWydvY3RvYmVyJywgMTBdLCBbJ25vdmVtYmVyJywgMTFdLCBbJ2RlY2VtYmVyJywgMTJdCl0pOwoKZnVuY3Rpb24gY2Fub25pY2FsRGF0ZSh5ZWFyLCBtb250aCwgZGF5KSB7CiAgY29uc3QgeSA9IE51bWJlcih5ZWFyKTsKICBjb25zdCBtID0gTnVtYmVyKG1vbnRoKTsKICBjb25zdCBkID0gTnVtYmVyKGRheSk7CiAgaWYgKCFOdW1iZXIuaXNJbnRlZ2VyKHkpIHx8ICFOdW1iZXIuaXNJbnRlZ2VyKG0pIHx8ICFOdW1iZXIuaXNJbnRlZ2VyKGQpCiAgICAgIHx8IHkgPCAyMDAwIHx8IHkgPiAyMTAwIHx8IG0gPCAxIHx8IG0gPiAxMiB8fCBkIDwgMSB8fCBkID4gMzEpIHJldHVybiAnJzsKICByZXR1cm4gYCR7U3RyaW5nKHkpLnBhZFN0YXJ0KDQsICcwJyl9LSR7U3RyaW5nKG0pLnBhZFN0YXJ0KDIsICcwJyl9LSR7U3RyaW5nKGQpLnBhZFN0YXJ0KDIsICcwJyl9YDsKfQoKZnVuY3Rpb24gbm9ybWFsaXplRXRhKHZhbHVlKSB7CiAgY29uc3QgdGV4dCA9IGNsZWFuKHZhbHVlKTsKICBpZiAoIXRleHQpIHJldHVybiAnJzsKCiAgbGV0IG1hdGNoID0gdGV4dC5tYXRjaCgvXihcZHs0fSnrhYRccyooXGR7MSwyfSnsm5RccyooXGR7MSwyfSnsnbwkLyk7CiAgaWYgKG1hdGNoKSByZXR1cm4gY2Fub25pY2FsRGF0ZShtYXRjaFsxXSwgbWF0Y2hbMl0sIG1hdGNoWzNdKSB8fCB0ZXh0OwoKICBtYXRjaCA9IHRleHQubWF0Y2goL14oXGR7NH0pXHMqWy0uL11ccyooXGR7MSwyfSlccypbLS4vXVxzKihcZHsxLDJ9KVwuPyQvKTsKICBpZiAobWF0Y2gpIHJldHVybiBjYW5vbmljYWxEYXRlKG1hdGNoWzFdLCBtYXRjaFsyXSwgbWF0Y2hbM10pIHx8IHRleHQ7CgogIG1hdGNoID0gdGV4dC5tYXRjaCgvXihbQS1aYS16XSspXHMrKFxkezEsMn0pLFxzKihcZHs0fSkkLyk7CiAgaWYgKG1hdGNoKSB7CiAgICBjb25zdCBtb250aCA9IEVOR0xJU0hfTU9OVEhTLmdldChtYXRjaFsxXS50b0xvd2VyQ2FzZSgpKTsKICAgIGlmIChtb250aCkgcmV0dXJuIGNhbm9uaWNhbERhdGUobWF0Y2hbM10sIG1vbnRoLCBtYXRjaFsyXSkgfHwgdGV4dDsKICB9CgogIHJldHVybiB0ZXh0Owp9CgpmdW5jdGlvbiBjb21wYXJhYmxlRmllbGRWYWx1ZShmaWVsZEtleSwgdmFsdWUpIHsKICByZXR1cm4gZmllbGRLZXkgPT09ICdldGEnID8gbm9ybWFsaXplRXRhKHZhbHVlKSA6IGNsZWFuKHZhbHVlKTsKfQoiIiIKCmlmICJmdW5jdGlvbiBub3JtYWxpemVFdGEodmFsdWUpIiBub3QgaW4gdGV4dDoKICAgIGlmIG1hcmtlciBub3QgaW4gdGV4dDoKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KCJoZWxwZXIgaW5zZXJ0aW9uIG1hcmtlciBub3QgZm91bmQiKQogICAgdGV4dCA9IHRleHQucmVwbGFjZShtYXJrZXIsIG1hcmtlciArIGhlbHBlciwgMSkKCm9sZCA9ICIiIiAgICBjb25zdCBjaGFuZ2VkRmllbGRzID0gZmllbGRzCiAgICAgIC5maWx0ZXIoKGZpZWxkKSA9PiBjbGVhbihiZWZvcmVbZmllbGQua2V5XSkgIT09IGNsZWFuKHJvd1tmaWVsZC5rZXldKSkKICAgICAgLm1hcCgoZmllbGQpID0+ICh7IC4uLmZpZWxkLCBiZWZvcmU6IGJlZm9yZVtmaWVsZC5rZXldLCBhZnRlcjogcm93W2ZpZWxkLmtleV0gfSkpOwoiIiIKbmV3ID0gIiIiICAgIGNvbnN0IGNoYW5nZWRGaWVsZHMgPSBmaWVsZHMKICAgICAgLmZpbHRlcigoZmllbGQpID0+IGNvbXBhcmFibGVGaWVsZFZhbHVlKGZpZWxkLmtleSwgYmVmb3JlW2ZpZWxkLmtleV0pICE9PSBjb21wYXJhYmxlRmllbGRWYWx1ZShmaWVsZC5rZXksIHJvd1tmaWVsZC5rZXldKSkKICAgICAgLm1hcCgoZmllbGQpID0+ICh7CiAgICAgICAgLi4uZmllbGQsCiAgICAgICAgYmVmb3JlOiBmaWVsZC5rZXkgPT09ICdldGEnID8gbm9ybWFsaXplRXRhKGJlZm9yZVtmaWVsZC5rZXldKSA6IGJlZm9yZVtmaWVsZC5rZXldLAogICAgICAgIGFmdGVyOiBmaWVsZC5rZXkgPT09ICdldGEnID8gbm9ybWFsaXplRXRhKHJvd1tmaWVsZC5rZXldKSA6IHJvd1tmaWVsZC5rZXldCiAgICAgIH0pKTsKIiIiCmlmIG9sZCBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoImRpZmZSb3dzIGNvbXBhcmlzb24gYmxvY2sgbm90IGZvdW5kIikKdGV4dCA9IHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkKCm9sZF9zYXZlID0gIiAgICByb3dzOiBzbmFwc2hvdC5yb3dzXG4iCm5ld19zYXZlID0gIiAgICByb3dzOiBzbmFwc2hvdC5yb3dzLm1hcCgocm93KSA9PiAoeyAuLi5yb3csIGV0YTogbm9ybWFsaXplRXRhKHJvdy5ldGEpIH0pKVxuIgppZiBvbGRfc2F2ZSBub3QgaW4gdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoInNhdmVTdGF0ZSByb3dzIGJsb2NrIG5vdCBmb3VuZCIpCnRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkX3NhdmUsIG5ld19zYXZlLCAxKQoKcGF0aC53cml0ZV90ZXh0KHRleHQpCg==' | base64 -d | python3
           node --check scripts/check-swagkeys.mjs
 
       - name: Commit fix and remove one-shot workflow
