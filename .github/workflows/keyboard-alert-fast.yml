@@ -74,7 +74,7 @@ jobs:
           fi
           npm run system:health -- transition fast dcinside "$status" '기키갤 떴냐' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
 
-      - name: Check SWAGKEYS restock watchlist
+      - name: Check restock watchlist (Actions)
         if: always()
         env:
           RESTOCK_DISCORD_WEBHOOK_URL: ${{ secrets.RESTOCK_DISCORD_WEBHOOK_URL }}
@@ -85,15 +85,15 @@ jobs:
           if npm run check:restock; then
             :
           else
-            echo 'SWAGKEYS restock read failed once; retrying...'
+            echo 'Restock watcher read failed once; retrying...'
             if npm run check:restock; then
               :
             else
               status=fail
-              echo 'SWAGKEYS restock watcher is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+              echo 'Restock watcher is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
             fi
           fi
-          npm run system:health -- transition fast restock "$status" 'SWAGKEYS 재입고' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
+          npm run system:health -- transition fast restock "$status" '재입고 감시 (Actions)' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
 
       - name: Persist fast watcher state
         if: always()
