@@ -30,34 +30,25 @@ jobs:
           path = Path('scripts/check-swagkeys.mjs')
           text = path.read_text()
 
-          old_scroll = '''    if ((step + 1) % 16 === 0) {
-              await page.evaluate(() => {
-                const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
-                scroller.scrollTop = 0;
-              });
-              await page.mouse.wheel(0, -10000);
-            } else {
-              await page.mouse.wheel(0, 900);
-            }
-            await page.waitForTimeout(650);'''
+          scroll_start = text.index('    if ((step + 1) % 16 === 0) {')
+          scroll_marker = '    await page.waitForTimeout(650);'
+          scroll_end = text.index(scroll_marker, scroll_start) + len(scroll_marker)
           new_scroll = '''    const resetScroll = (step + 1) % 24 === 0;
-            const scrollState = await page.evaluate((shouldReset) => {
-              const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
-              if (shouldReset) {
-                scroller.scrollTop = 0;
-              } else {
-                const distance = Math.max(900, Math.floor((scroller.clientHeight || window.innerHeight || 900) * 0.8));
-                scroller.scrollTop = Math.min(scroller.scrollTop + distance, scroller.scrollHeight);
-              }
-              return {
-                top: scroller.scrollTop,
-                max: Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-              };
-            }, resetScroll);
-            await page.waitForTimeout(!resetScroll && scrollState.max > 0 && scrollState.top >= scrollState.max - 5 ? 1200 : 500);'''
-          if old_scroll not in text:
-              raise SystemExit('scroll block not found')
-          text = text.replace(old_scroll, new_scroll, 1)
+              const scrollState = await page.evaluate((shouldReset) => {
+                const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
+                if (shouldReset) {
+                  scroller.scrollTop = 0;
+                } else {
+                  const distance = Math.max(900, Math.floor((scroller.clientHeight || window.innerHeight || 900) * 0.8));
+                  scroller.scrollTop = Math.min(scroller.scrollTop + distance, scroller.scrollHeight);
+                }
+                return {
+                  top: scroller.scrollTop,
+                  max: Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+                };
+              }, resetScroll);
+              await page.waitForTimeout(!resetScroll && scrollState.max > 0 && scrollState.top >= scrollState.max - 5 ? 1200 : 500);'''
+          text = text[:scroll_start] + new_scroll + text[scroll_end:]
 
           start = text.index('async function fetchSnapshot(')
           end = text.index('\nfunction loadState()', start)
