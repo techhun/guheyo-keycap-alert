@@ -26,6 +26,45 @@ function canonicalFromResolved(value) {
   };
 }
 
+
+function canonicalFromAnyNaverUrl(value) {
+  const queue = [String(value || '')];
+  const seen = new Set();
+  for (let step = 0; step < 16 && queue.length; step += 1) {
+    const candidate = queue.shift();
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    try {
+      const direct = canonicalFromResolved(candidate);
+      if (direct) return direct;
+    } catch {}
+
+    let decoded = candidate;
+    for (let pass = 0; pass < 3; pass += 1) {
+      try {
+        const next = decodeURIComponent(decoded);
+        if (next === decoded) break;
+        decoded = next;
+        queue.push(decoded);
+      } catch {
+        break;
+      }
+    }
+
+    try {
+      const url = new URL(candidate);
+      for (const key of ['url', 'redirectUrl', 'targetUrl', 'dst']) {
+        const nested = url.searchParams.get(key);
+        if (nested) queue.push(nested);
+      }
+    } catch {}
+
+    const match = decoded.match(/https?:\/\/(?:m\.)?smartstore\.naver\.com\/[^/?#]+\/products\/\d+/i);
+    if (match) queue.push(match[0]);
+  }
+  return null;
+}
+
 function extractBalancedObject(text, marker) {
   const markerIndex = text.indexOf(marker);
   if (markerIndex < 0) return null;
@@ -279,11 +318,13 @@ export async function inspectNaverSmartStore(value) {
   const { context, browser } = await createContext();
   try {
     const page = await context.newPage();
-    let resolved = canonicalFromResolved(original);
+    let resolved = canonicalFromAnyNaverUrl(original);
     if (!resolved) {
       await page.goto(original, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      await page.waitForTimeout(1200);
-      resolved = canonicalFromResolved(page.url());
+      for (let attempt = 0; attempt < 5 && !resolved; attempt += 1) {
+        resolved = canonicalFromAnyNaverUrl(page.url());
+        if (!resolved) await page.waitForTimeout(1000);
+      }
     }
     if (!resolved) throw new Error(`could not resolve SmartStore product URL: ${original}`);
 
