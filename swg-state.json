@@ -1,19 +1,15 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T07:33:01.435Z",
+  "updatedAt": "2026-09-16T07:47:39.698Z",
   "announcement": {
     "heading": "업데이트(26.09.08)",
     "content": "SWG Bolch 실사가 추가되었습니다. / SWG Bolch photos have been added.\n프로젝트 진행 상황 페이지가 업데이트 되었습니다. 전반적인 로고들이 재작업 후 업데이트 되었습니다. / Keycap Status Page has been updated. New Logos have been updated."
   },
   "quarters": {
     "Q1": [
-      "SWG Beige",
-      "SWG Rubber",
-      "SWG Nimbus",
-      "SWG Euler",
-      "SWG Prepress",
-      "SWG Classic Red"
+      "Something went wrong",
+      "Try again"
     ],
     "Q2": [
       "SWG Ferrofluid",
@@ -25,12 +21,12 @@
       "SWG Midnight Rainbow"
     ],
     "Q3": [
-      "문제 발생",
-      "다시 시도하기"
+      "Something went wrong",
+      "Try again"
     ],
     "Q4": [
-      "문제 발생",
-      "다시 시도하기"
+      "Something went wrong",
+      "Try again"
     ]
   },
   "rows": [
