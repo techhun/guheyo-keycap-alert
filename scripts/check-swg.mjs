@@ -42,6 +42,7 @@ async function openWithRetry(context, url, label, extractor) {
     } catch (error) {
       lastError = error;
       console.warn(`SWAGKEYS ${label} attempt ${attempt} failed: ${error?.message || error}`);
+      console.warn(`SWAGKEYS ${label} diagnostics: title=${await page.title().catch(() => '')}; body=${clean((await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')).slice(0, 300))}`);
       if (attempt < 3) await sleep(4000);
     } finally {
       await page.close();
@@ -52,6 +53,10 @@ async function openWithRetry(context, url, label, extractor) {
 }
 
 async function extractRoadmap(page) {
+  await page.waitForTimeout(4000);
+  if (!/Swagkeys Keycap Roadmap/i.test(await page.title())) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+  }
   await page.waitForFunction(() => {
     const note = document.querySelector('[role="note"]') || document.querySelector('.notion-callout-block');
     return /업데이트\s*\(/.test(note?.innerText || '');
