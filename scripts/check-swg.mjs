@@ -59,7 +59,11 @@ async function extractRoadmap(page) {
   }
   await page.waitForFunction(() => {
     const note = document.querySelector('[role="note"]') || document.querySelector('.notion-callout-block');
-    return /업데이트\s*\(/.test(note?.innerText || '');
+    const quarterBlocks = [...document.querySelectorAll('.notion-collection_view-block')]
+      .filter((block) => /^[1-4]분기\s*\(Q[1-4]\)/i.test((block.innerText || '').trim()));
+    return /업데이트\s*\(/.test(note?.innerText || '')
+      && quarterBlocks.length === 4
+      && quarterBlocks.every((block) => !/불러오는 중/.test(block.innerText || ''));
   }, undefined, { timeout: 20000 });
   await page.waitForTimeout(800);
 
@@ -71,19 +75,15 @@ async function extractRoadmap(page) {
       .map((line) => line.replace(/\s+/g, ' ').trim())
       .filter((line) => line && line !== '📌');
     const headingIndex = lines.findIndex((line) => /^업데이트\s*\(/.test(line));
-    const pageLines = tidy(document.querySelector('.notion-page-content')?.innerText)
-      .split('\n')
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter(Boolean);
     const quarters = { Q1: [], Q2: [], Q3: [], Q4: [] };
-    let currentQuarter = '';
-    for (const line of pageLines) {
-      const match = line.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
-      if (match) {
-        currentQuarter = `Q${match[1]}`;
-        continue;
-      }
-      if (currentQuarter && line !== '결과 없음') quarters[currentQuarter].push(line);
+    for (const block of document.querySelectorAll('.notion-collection_view-block')) {
+      const blockLines = tidy(block.innerText)
+        .split('\n')
+        .map((line) => line.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      const match = blockLines[0]?.match(/^[1-4]분기\s*\(Q([1-4])\)$/i);
+      if (!match) continue;
+      quarters[`Q${match[1]}`] = blockLines.slice(1).filter((line) => line !== '결과 없음');
     }
     return {
       announcement: {
@@ -379,6 +379,13 @@ async function main() {
   const previousRows = Array.isArray(state?.rows) ? state.rows : [];
   if (!state?.initialized || previousRows.length === 0) {
     console.log(`Baseline initialization: storing ${snapshot.rows.length} SWAGKEYS rows without notifying.`);
+    saveState(snapshot);
+    return;
+  }
+
+  const storedQuarterValues = Object.values(state.quarters || {}).flat();
+  if (storedQuarterValues.some((value) => /불러오는 중/.test(clean(value)))) {
+    console.warn('Stored SWAGKEYS quarter roadmap was incomplete. Replacing it with a verified snapshot without notifying.');
     saveState(snapshot);
     return;
   }
