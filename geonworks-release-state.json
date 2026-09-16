@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T08:00:00.859Z",
+  "updatedAt": "2026-09-16T08:19:49.238Z",
   "rows": [
     {
       "product": "SENSY Supernova",
@@ -78,7 +78,7 @@
       "status": "For Sale",
       "fixed": "확정 / Fixed",
       "start": "2026-10-04",
-      "end": "2026-09-16"
+      "end": "2026-09-21"
     }
   ]
 }

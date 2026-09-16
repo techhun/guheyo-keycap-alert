@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T07:59:53.866Z",
+  "updatedAt": "2026-09-16T08:19:41.892Z",
   "rows": [
     {
       "product": "GMK DIVINAPAPAYA",
@@ -75,13 +75,13 @@
     },
     {
       "product": "Nexus60",
-      "gbStart": "2026. 9. 16",
+      "gbStart": "2026. 9. 21",
       "eta": "2026. 12. 31",
       "type": "Keyboard",
       "manufacturer": "KEZEWA",
       "status": "GB on sale",
       "update": "2026. 9. 16",
-      "note": "—"
+      "note": "9월 21일 판매 예정 /Scheduled for sale on September 21"
     },
     {
       "product": "Keykobo Cross Impact",
