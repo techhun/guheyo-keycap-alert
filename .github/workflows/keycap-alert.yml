@@ -56,13 +56,19 @@ jobs:
           PROTOTYPIST_DISCORD_WEBHOOK_URL: ${{ secrets.PROTOTYPIST_DISCORD_WEBHOOK_URL }}
         run: npm run check:prototypist || (echo 'ProtoTypist read failed once; retrying...' && npm run check:prototypist)
 
+      - name: Check SWAGKEYS roadmap
+        if: always()
+        env:
+          SWG_DISCORD_WEBHOOK_URL: ${{ secrets.SWG_DISCORD_WEBHOOK_URL }}
+        run: npm run check:swg || (echo 'SWAGKEYS read failed once; retrying...' && npm run check:swg)
+
       - name: Persist watcher state
         if: always()
         shell: bash
         run: |
           changed_files=()
 
-          for file in state.json geonworks-state.json geonworks-release-state.json prototypist-state.json; do
+          for file in state.json geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json; do
             if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
               changed_files+=("$file")
             fi
