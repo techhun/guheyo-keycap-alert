@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |
           changed_files=()
-          for file in geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json swagkeys-state.json; do
+          for file in package-lock.json geonworks-state.json geonworks-release-state.json prototypist-state.json swagkeys-state.json; do
             if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
               changed_files+=("$file")
             fi
@@ -110,7 +110,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "${changed_files[@]}"
-          git commit -m 'Update slow watcher state'
+          git commit -m 'Update slow watcher state and lockfile'
           for attempt in 1 2 3; do
             if git pull --rebase origin main && git push origin main; then
               exit 0
