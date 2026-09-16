@@ -1,0 +1,37 @@
+name: Discord webhook test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/discord-test.yml'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send recent listing test
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          node - <<'NODE'
+          const webhook = process.env.DISCORD_WEBHOOK_URL;
+          if (!webhook) throw new Error('DISCORD_WEBHOOK_URL is missing');
+          const payload = {
+            username: 'Guheyo Keycap Alert',
+            allowed_mentions: { parse: [] },
+            embeds: [{
+              title: 'GMK Fuji Latin Base',
+              url: 'https://guheyo.com/offer/GMK-Fuji-Latin-Base-iaaIMNPgqE84BqTRqAzgB',
+              description: '최근 구해요 키캡 판매글 테스트 알림',
+              fields: [{ name: '가격', value: '130,000원', inline: true }],
+              footer: { text: '테스트 알림' }
+            }]
+          };
+          const response = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+          console.log('Discord test sent:', response.status);
+          NODE
