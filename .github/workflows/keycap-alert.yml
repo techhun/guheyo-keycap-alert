@@ -1,5 +1,7 @@
-name: Keyboard alerts
+name: Keyboard alerts (fast)
 
+# Legacy filename retained so the existing cron-job.org endpoint keeps working.
+# After cron is moved to keyboard-alert-fast.yml, this compatibility workflow can be removed.
 on:
   workflow_dispatch:
 
@@ -7,13 +9,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: keyboard-alerts
+  group: keyboard-alerts-fast
   cancel-in-progress: false
 
 jobs:
-  monitor:
+  monitor-fast:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 4
 
     steps:
       - name: Checkout
@@ -32,9 +34,11 @@ jobs:
 
       - name: Check Guheyo keycap listings
         env:
+          GUHEYO_NTFY_TOPIC: ${{ secrets.GUHEYO_NTFY_TOPIC }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GUHEYO_DISCORD_WEBHOOK_URL: ${{ secrets.GUHEYO_DISCORD_WEBHOOK_URL }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: npm run check
+        run: npm run check:guheyo
 
       - name: Check DCInside tteotnya posts
         if: always()
@@ -53,61 +57,36 @@ jobs:
 
           echo 'DCInside is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
 
-      - name: Check GEONWORKS GB schedule
-        if: always()
-        env:
-          GEONWORKS_DISCORD_WEBHOOK_URL: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
-        run: npm run check:geonworks
-
-      - name: Check GEONWORKS Release schedule
-        if: always()
-        env:
-          GEONWORKS_DISCORD_WEBHOOK_URL: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
-        run: npm run check:geonworks-release
-
-      - name: Check ProtoTypist updates
-        if: always()
-        env:
-          PROTOTYPIST_DISCORD_WEBHOOK_URL: ${{ secrets.PROTOTYPIST_DISCORD_WEBHOOK_URL }}
-        run: npm run check:prototypist || (echo 'ProtoTypist read failed once; retrying...' && npm run check:prototypist)
-
-      - name: Check SWAGKEYS roadmap
-        if: always()
-        env:
-          SWG_DISCORD_WEBHOOK_URL: ${{ secrets.SWG_DISCORD_WEBHOOK_URL }}
-        shell: bash
-        run: |
-          if npm run check:swg; then
-            exit 0
-          fi
-
-          echo 'SWAGKEYS read failed once; retrying...'
-          if npm run check:swg; then
-            exit 0
-          fi
-
-          echo 'SWAGKEYS is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
-
-      - name: Persist watcher state
+      - name: Persist fast watcher state
         if: always()
         shell: bash
         run: |
           changed_files=()
 
-          for file in state.json dcinside-tteotnya-state.json geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json; do
+          for file in guheyo-state.json dcinside-tteotnya-state.json; do
             if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
               changed_files+=("$file")
             fi
           done
 
           if [ ${#changed_files[@]} -eq 0 ]; then
-            echo 'Watcher state unchanged.'
+            echo 'Fast watcher state unchanged.'
             exit 0
           fi
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "${changed_files[@]}"
-          git commit -m 'Update watcher state'
-          git pull --rebase origin main
-          git push origin main
+          git commit -m 'Update fast watcher state'
+
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
+            git rebase --abort >/dev/null 2>&1 || true
+            echo "Fast state push attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 2))
+          done
+
+          echo 'Failed to persist fast watcher state after retries.'
+          exit 1
