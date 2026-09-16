@@ -1,8 +1,18 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T07:50:05.202Z",
+  "updatedAt": "2026-09-16T07:59:53.866Z",
   "rows": [
+    {
+      "product": "GMK DIVINAPAPAYA",
+      "gbStart": "2025. 12. 16",
+      "eta": "2026. 9. 30",
+      "type": "Keycap",
+      "manufacturer": "GMK",
+      "status": "inspecting",
+      "update": "2026. 9. 16",
+      "note": "9월 17일 발송 예정 / Scheduled to ship on September 17"
+    },
     {
       "product": "Supernova",
       "gbStart": "2026. 8. 20",
@@ -10,7 +20,7 @@
       "type": "Keyboard",
       "manufacturer": "SENSY",
       "status": "GB on sale",
-      "update": "2026. 8. 21",
+      "update": "2026. 9. 16",
       "note": "—"
     },
     {
@@ -61,6 +71,16 @@
       "manufacturer": "GMK",
       "status": "GB on sale",
       "update": "2026. 9. 15",
+      "note": "—"
+    },
+    {
+      "product": "Nexus60",
+      "gbStart": "2026. 9. 16",
+      "eta": "2026. 12. 31",
+      "type": "Keyboard",
+      "manufacturer": "KEZEWA",
+      "status": "GB on sale",
+      "update": "2026. 9. 16",
       "note": "—"
     },
     {
@@ -661,26 +681,6 @@
       "manufacturer": "KEYKOBO",
       "status": "In progress",
       "update": "2026. 9. 7",
-      "note": "—"
-    },
-    {
-      "product": "GMK DIVINAPAPAYA",
-      "gbStart": "2025. 12. 16",
-      "eta": "2026. 9. 30",
-      "type": "Keycap",
-      "manufacturer": "GMK",
-      "status": "inspecting",
-      "update": "2026. 9. 15",
-      "note": "검수 중 / Under Inspecting"
-    },
-    {
-      "product": "Nexus60",
-      "gbStart": "—",
-      "eta": "—",
-      "type": "Keyboard",
-      "manufacturer": "KEZEWA",
-      "status": "GB on sale",
-      "update": "2026. 9. 16",
       "note": "—"
     }
   ]
