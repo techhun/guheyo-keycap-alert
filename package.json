@@ -7,7 +7,8 @@
     "check": "node scripts/check.mjs",
     "check:geonworks": "node scripts/check-geonworks.mjs",
     "check:geonworks-release": "node scripts/check-geonworks-release.mjs",
-    "check:prototypist": "node scripts/check-prototypist-v3.mjs"
+    "check:prototypist": "node scripts/check-prototypist-v3.mjs",
+    "check:swg": "node scripts/check-swg.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
