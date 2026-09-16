@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "initialized": true,
+  "updatedAt": "2026-09-16T04:19:22.521Z",
+  "rows": [
+    {
+      "product": "SENSY Supernova",
+      "manufacturer": "SENSY",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keyboard",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-08-20",
+      "end": "2026-09-17"
+    },
+    {
+      "product": "Keykobo Cobalt",
+      "manufacturer": "KEYKOBO",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keycaps",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-08-31",
+      "end": "2026-10-06"
+    },
+    {
+      "product": "GMK CYL Mothman",
+      "manufacturer": "GMK",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keycaps",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-09-04",
+      "end": "2026-09-25"
+    },
+    {
+      "product": "GMK CYL Varenye",
+      "manufacturer": "GMK",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keycaps",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-09-04",
+      "end": "2026-09-25"
+    },
+    {
+      "product": "GMK MTNU Oblivion",
+      "manufacturer": "GMK",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keycaps",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-09-15",
+      "end": "2026-10-09"
+    },
+    {
+      "product": "GMK CYL Red Devils",
+      "manufacturer": "GMK",
+      "region": "KR/GLOBAL",
+      "saleType": "Group Buy",
+      "type": "Keycaps",
+      "status": "For Sale",
+      "fixed": "확정 / Fixed",
+      "start": "2026-09-15",
+      "end": "2026-10-09"
+    }
+  ]
+}
