@@ -38,54 +38,77 @@ async function githubRequest(url, options = {}) {
     },
     signal: AbortSignal.timeout(20000)
   });
-  if (!response.ok) throw new Error(`GitHub API ${response.status}: ${await response.text()}`);
-  return response.json();
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`GitHub API ${response.status}: ${text}`);
+    error.status = response.status;
+    throw error;
+  }
+  return text ? JSON.parse(text) : {};
+}
+
+function contentApiUrl(path) {
+  const { owner, repo } = repoParts();
+  return `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
 }
 
 export async function readGitHubJson(path, fallback) {
-  const { owner, repo } = repoParts();
   const branch = clean(process.env.RESTOCK_GITHUB_BRANCH || 'main');
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`;
   try {
-    const payload = await githubRequest(url);
+    const payload = await githubRequest(`${contentApiUrl(path)}?ref=${encodeURIComponent(branch)}`);
     const text = Buffer.from(payload.content || '', 'base64').toString('utf8');
     return { value: JSON.parse(text), sha: payload.sha };
   } catch (error) {
-    if (/GitHub API 404/.test(String(error?.message))) return { value: structuredClone(fallback), sha: null };
+    if (error?.status === 404) return { value: structuredClone(fallback), sha: null };
     throw error;
   }
 }
 
-export async function writeGitHubJson(path, value, message, expectedSha = null) {
-  const { owner, repo } = repoParts();
+async function putGitHubJson(path, value, message, sha) {
   const branch = clean(process.env.RESTOCK_GITHUB_BRANCH || 'main');
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const body = {
+    message,
+    branch,
+    content: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8').toString('base64'),
+    ...(sha ? { sha } : {})
+  };
+  return githubRequest(contentApiUrl(path), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
+
+export async function writeGitHubJson(path, value, message, expectedSha = null) {
   let sha = expectedSha;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      if (!sha) {
-        const current = await readGitHubJson(path, null);
-        sha = current.sha;
-      }
-      const body = {
-        message,
-        branch,
-        content: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8').toString('base64'),
-        ...(sha ? { sha } : {})
-      };
-      return await githubRequest(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      if (!sha) sha = (await readGitHubJson(path, null)).sha;
+      return await putGitHubJson(path, value, message, sha);
     } catch (error) {
-      if (attempt >= 3 || !/409|422/.test(String(error?.message))) throw error;
+      if (attempt >= 3 || ![409, 422].includes(error?.status)) throw error;
       await sleep(attempt * 700);
-      const latest = await readGitHubJson(path, null);
-      sha = latest.sha;
+      sha = (await readGitHubJson(path, null)).sha;
     }
   }
   throw new Error(`failed to write GitHub JSON: ${path}`);
+}
+
+export async function updateGitHubJson(path, fallback, message, mutator) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const current = await readGitHubJson(path, fallback);
+    const draft = structuredClone(current.value ?? fallback);
+    const next = await mutator(draft);
+    if (next === null || next === undefined) return { changed: false, value: current.value };
+    try {
+      const result = await putGitHubJson(path, next, message, current.sha);
+      return { changed: true, value: next, result };
+    } catch (error) {
+      if (attempt >= 4 || ![409, 422].includes(error?.status)) throw error;
+      await sleep(attempt * 500);
+    }
+  }
+  throw new Error(`failed to atomically update GitHub JSON: ${path}`);
 }
 
 export function githubStorageConfigured() {
