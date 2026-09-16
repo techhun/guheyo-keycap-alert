@@ -89,6 +89,12 @@ function truncate(text, maxLength) {
   return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+function formatPriceManwon(price) {
+  const amount = Number(String(price || '').replace(/[^\d]/g, ''));
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 }).format(amount / 10_000);
+}
+
 async function fetchListingDetail(item) {
   const detailPage = await browser.newPage({
     viewport: { width: 1280, height: 1800 },
@@ -212,24 +218,22 @@ async function sendDiscord(item) {
   }
 
   const detailChunks = splitText(item.detail || '판매글 본문이 없습니다.', DISCORD_DETAIL_CHARS);
+  const shortPrice = formatPriceManwon(item.price);
 
   for (let i = 0; i < detailChunks.length; i += 1) {
     const first = i === 0;
     const total = detailChunks.length;
     const sourceLink = first ? `\n\n[🔗 판매글 보기](${item.url})` : '';
+    const titleText = shortPrice ? `${item.title} - ${shortPrice}` : item.title;
     const embed = {
       title: first
-        ? `🆕 ${truncate(item.title, 250)}`
+        ? `🆕 ${truncate(titleText, 250)}`
         : `↳ 본문 계속 (${i + 1}/${total})`,
       url: item.url,
-      description: `**판매글 내용**\n${detailChunks[i]}${sourceLink}`,
+      description: `${detailChunks[i]}${sourceLink}`,
       footer: { text: first ? '구해요 · 키캡 판매 알림' : `구해요 · 본문 ${i + 1}/${total}` },
       timestamp: new Date().toISOString()
     };
-
-    if (first && item.price) {
-      embed.fields = [{ name: '💰 가격', value: `**${item.price}**`, inline: true }];
-    }
 
     const response = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
