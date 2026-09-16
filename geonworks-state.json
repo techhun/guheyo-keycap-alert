@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T03:05:47.729Z",
+  "updatedAt": "2026-09-16T05:13:50.573Z",
   "rows": [
     {
       "product": "Supernova",
@@ -220,8 +220,8 @@
       "type": "Keyboard",
       "manufacturer": "SENSY",
       "status": "In progress",
-      "update": "2026. 9. 15",
-      "note": "현지 공장에서 배대지로 출발 / Shipped from the local factory to the distribution center"
+      "update": "2026. 9. 16",
+      "note": "배대지 입고 완료 / Goods Received at Distribution Center"
     },
     {
       "product": "Stratum 80",
