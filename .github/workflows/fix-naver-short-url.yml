@@ -1,0 +1,134 @@
+name: Fix Naver short URL resolution
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-naver-short-url.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - name: Patch short URL resolver
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/restock/providers/naver-smartstore.mjs')
+          text = path.read_text()
+          marker = "\nfunction extractBalancedObject(text, marker) {"
+          helper = r'''
+
+          function canonicalFromAnyNaverUrl(value) {
+            const queue = [String(value || '')];
+            const seen = new Set();
+            for (let step = 0; step < 16 && queue.length; step += 1) {
+              const candidate = queue.shift();
+              if (!candidate || seen.has(candidate)) continue;
+              seen.add(candidate);
+              try {
+                const direct = canonicalFromResolved(candidate);
+                if (direct) return direct;
+              } catch {}
+
+              let decoded = candidate;
+              for (let pass = 0; pass < 3; pass += 1) {
+                try {
+                  const next = decodeURIComponent(decoded);
+                  if (next === decoded) break;
+                  decoded = next;
+                  queue.push(decoded);
+                } catch {
+                  break;
+                }
+              }
+
+              try {
+                const url = new URL(candidate);
+                for (const key of ['url', 'redirectUrl', 'targetUrl', 'dst']) {
+                  const nested = url.searchParams.get(key);
+                  if (nested) queue.push(nested);
+                }
+              } catch {}
+
+              const match = decoded.match(/https?:\/\/(?:m\.)?smartstore\.naver\.com\/[^/?#]+\/products\/\d+/i);
+              if (match) queue.push(match[0]);
+            }
+            return null;
+          }
+          '''
+          if marker not in text:
+              raise SystemExit('resolver insertion marker not found')
+          text = text.replace(marker, helper + marker, 1)
+
+          old = r'''    let resolved = canonicalFromResolved(original);
+              if (!resolved) {
+                await page.goto(original, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                await page.waitForTimeout(1200);
+                resolved = canonicalFromResolved(page.url());
+              }
+              if (!resolved) throw new Error(`could not resolve SmartStore product URL: ${original}`);
+
+              if (!canonicalFromResolved(page.url())) {
+                await page.goto(resolved.mobileUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+              }'''
+          new = r'''    let resolved = canonicalFromAnyNaverUrl(original);
+              if (!resolved) {
+                await page.goto(original, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                for (let attempt = 0; attempt < 5 && !resolved; attempt += 1) {
+                  resolved = canonicalFromAnyNaverUrl(page.url());
+                  if (!resolved) await page.waitForTimeout(1000);
+                }
+              }
+              if (!resolved) throw new Error(`could not resolve SmartStore product URL: ${original}`);
+
+              if (!canonicalFromResolved(page.url())) {
+                await page.goto(resolved.mobileUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+              }'''
+          if old not in text:
+              raise SystemExit('inspect resolver block not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          node --check scripts/restock/providers/naver-smartstore.mjs
+      - name: Verify short URL reaches SmartStore block detection
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { inspectProduct } from './scripts/restock/providers/index.mjs';
+          try {
+            const result = await inspectProduct('https://naver.me/xiLfDSsP');
+            assert.equal(result.provider, 'naver-smartstore');
+            console.log('NAVER_PROVIDER_OK', result.title, result.meta);
+          } catch (error) {
+            console.log('NAVER_RESULT', error.code, error.message);
+            assert.ok(['NAVER_SMARTSTORE_BLOCKED', 'NAVER_SMARTSTORE_PARSE'].includes(error.code));
+          }
+          JS
+      - name: Commit fix and remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/restock/providers/naver-smartstore.mjs
+          git rm .github/workflows/fix-naver-short-url.yml
+          git commit -m 'Resolve Naver SmartStore short URLs'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then exit 0; fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
