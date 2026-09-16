@@ -1,0 +1,73 @@
+name: GEONWORKS today updates
+
+on:
+  push:
+    paths:
+      - '.github/workflows/geonworks-today-test.yml'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send today's GEONWORKS updates
+        env:
+          GEON_WEBHOOK: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const webhook = (process.env.GEON_WEBHOOK || '').trim();
+          if (!webhook) throw new Error('GEONWORKS_DISCORD_WEBHOOK_URL is not configured');
+
+          const state = JSON.parse(fs.readFileSync('geonworks-state.json', 'utf8'));
+          const rows = Array.isArray(state.rows) ? state.rows : [];
+          const targetDate = '2026. 9. 16';
+          const matched = rows.filter((row) => String(row.update || '').trim() === targetDate);
+          console.log('MATCH_COUNT', matched.length);
+          console.log('MATCH_PRODUCTS', matched.map((x) => x.product).join(' | '));
+          if (!matched.length) process.exit(0);
+
+          const fmt = (value) => {
+            const text = String(value || '').trim();
+            const m = text.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})$/);
+            return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : (text || '—');
+          };
+
+          const pageUrl = 'https://geonworks.kr/customhtml/GB_schedule.html';
+          const embeds = matched.map((row) => ({
+            title: `📌 ${row.product}`,
+            url: pageUrl,
+            fields: [
+              { name: 'GB 시작일', value: fmt(row.gbStart), inline: true },
+              { name: '예상 발송일', value: fmt(row.eta), inline: true },
+              { name: '분류', value: row.type || '—', inline: true },
+              { name: '제조사', value: row.manufacturer || '—', inline: true },
+              { name: '상태', value: row.status || '—', inline: true },
+              { name: '갱신 일자', value: fmt(row.update), inline: true },
+              { name: '비고', value: String(row.note || '—').slice(0, 1024), inline: false }
+            ],
+            footer: { text: 'GEONWORKS · 오늘 업데이트' }
+          }));
+
+          for (let i = 0; i < embeds.length; i += 10) {
+            const chunk = embeds.slice(i, i + 10);
+            const sendUrl = new URL(webhook);
+            sendUrl.searchParams.set('wait', 'true');
+            const response = await fetch(sendUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                username: 'GEONWORKS Alert',
+                content: i === 0 ? `📅 **2026-09-16 지온웍스 오늘 업데이트 · 총 ${matched.length}건**` : undefined,
+                allowed_mentions: { parse: [] },
+                embeds: chunk
+              })
+            });
+            const body = await response.text();
+            if (!response.ok) throw new Error(`Discord failed: ${response.status} ${body}`);
+            const message = body ? JSON.parse(body) : {};
+            console.log('DISCORD_STATUS', response.status, 'MESSAGE_ID', message.id || 'none', 'EMBEDS', chunk.length);
+          }
+          NODE
