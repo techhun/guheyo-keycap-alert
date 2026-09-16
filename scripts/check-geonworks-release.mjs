@@ -27,7 +27,12 @@ function clean(value) {
 }
 
 function truncate(value, maxLength = 1000) {
-  const text = clean(value) || '—';
+  const text = String(value ?? '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(clean)
+    .filter(Boolean)
+    .join('\n') || '—';
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }

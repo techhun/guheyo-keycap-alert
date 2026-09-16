@@ -20,7 +20,12 @@ const SOURCES = [
 
 const clean = (value) => String(value ?? '').replace(/\r/g, '').replace(/\s+/g, ' ').trim();
 const truncate = (value, maxLength = 1000) => {
-  const text = clean(value) || '—';
+  const text = String(value ?? '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(clean)
+    .filter(Boolean)
+    .join('\n') || '—';
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
