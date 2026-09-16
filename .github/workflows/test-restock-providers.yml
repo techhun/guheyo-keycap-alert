@@ -1,0 +1,66 @@
+name: Test generic restock providers
+
+on:
+  push:
+    paths:
+      - '.github/workflows/test-restock-providers.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+
+      - name: Test Shopify and SmartStore providers
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { inspectProduct } from './scripts/restock/providers/index.mjs';
+          import { matchSnapshot } from './scripts/restock/providers/common.mjs';
+
+          const shopify = await inspectProduct('https://swagkeys.com/products/in-stock-qwertykeys-neo65-core-plus-%EC%82%AC%EB%B3%B8');
+          assert.equal(shopify.provider, 'shopify');
+          assert.ok(shopify.optionGroups.length >= 2);
+          assert.ok(shopify.variants.length >= 20);
+          const match = matchSnapshot(shopify, [
+            { key: shopify.optionGroups[0].key, name: shopify.optionGroups[0].name, kind: 'variant', value: 'Ano Black', label: 'Ano Black' },
+            { key: shopify.optionGroups[1].key, name: shopify.optionGroups[1].name, kind: 'variant', value: 'Brass', label: 'Brass' }
+          ]);
+          assert.equal(match.matchingVariants.length, 1);
+          console.log('SHOPIFY_OK', shopify.title, shopify.optionGroups.map(g => `${g.name}:${g.values.length}`).join(', '), `variants=${shopify.variants.length}`, `available=${match.available}`);
+
+          try {
+            const naver = await inspectProduct('https://naver.me/xiLfDSsP');
+            assert.equal(naver.provider, 'naver-smartstore');
+            console.log('NAVER_OK', naver.title, naver.meta);
+          } catch (error) {
+            assert.equal(error.code, 'NAVER_SMARTSTORE_BLOCKED');
+            console.log('NAVER_BLOCK_DETECTED', error.message);
+          }
+          JS
+
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/test-restock-providers.yml
+          git commit -m 'Remove restock provider test workflow'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then exit 0; fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
