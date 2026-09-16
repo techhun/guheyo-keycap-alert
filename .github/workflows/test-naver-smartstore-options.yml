@@ -1,0 +1,100 @@
+name: Inspect Naver SmartStore options
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - name: Inspect links
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+
+          const urls = [
+            'https://naver.me/xiLfDSsP',
+            'https://naver.me/5HyL0uvo',
+            'https://naver.me/5394h8Uv',
+            'https://naver.me/5eDHj6dP',
+            'https://naver.me/xnOo25zw'
+          ];
+
+          const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+          const context = await browser.newContext({
+            viewport: { width: 1440, height: 1200 },
+            locale: 'ko-KR',
+            userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+          });
+
+          for (const shortUrl of urls) {
+            const page = await context.newPage();
+            const interesting = new Set();
+            page.on('response', (res) => {
+              const u = res.url();
+              if (/smartstore|shopping|product|option|api/i.test(u) && interesting.size < 40) interesting.add(`${res.status()} ${u}`);
+            });
+            try {
+              console.log('\n===== SHORT:', shortUrl, '=====');
+              const response = await page.goto(shortUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+              await page.waitForTimeout(5000);
+              console.log('HTTP:', response?.status());
+              console.log('FINAL:', page.url());
+              console.log('TITLE:', await page.title());
+
+              const info = await page.evaluate(() => {
+                const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+                const text = clean(document.body?.innerText || '').slice(0, 2000);
+                const controls = [...document.querySelectorAll('select, button, [role="button"], [role="combobox"], [aria-haspopup="listbox"]')]
+                  .map((el) => ({
+                    tag: el.tagName,
+                    role: el.getAttribute('role'),
+                    aria: el.getAttribute('aria-label'),
+                    text: clean(el.innerText || el.textContent).slice(0, 120)
+                  }))
+                  .filter((x) => x.text || x.aria)
+                  .slice(0, 80);
+                const scripts = [...document.scripts]
+                  .map((s) => s.textContent || '')
+                  .filter((s) => /option|productNo|channelNo|salePrice|stockQuantity|optionCombinations/i.test(s))
+                  .map((s) => s.slice(0, 1200))
+                  .slice(0, 8);
+                return { text, controls, scripts };
+              });
+              console.log('BODY:', info.text);
+              console.log('CONTROLS:', JSON.stringify(info.controls, null, 2));
+              console.log('SCRIPT-SAMPLES:', JSON.stringify(info.scripts, null, 2));
+              console.log('NETWORK:', [...interesting].join('\n'));
+            } catch (e) {
+              console.log('ERROR:', e?.stack || e);
+            } finally {
+              await page.close();
+            }
+          }
+          await context.close();
+          await browser.close();
+          JS
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/test-naver-smartstore-options.yml
+          git commit -m 'Remove Naver SmartStore inspection workflow'
+          git push origin main
