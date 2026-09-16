@@ -8,7 +8,7 @@ const DISCORD_WEBHOOK_URL = (process.env.DISCORD_WEBHOOK_URL || '').trim();
 const STATE_PATH = 'state.json';
 const MAX_SEEN = 300;
 const NTFY_CHUNK_BYTES = 2800;
-const DISCORD_DESCRIPTION_LIMIT = 3800;
+const DISCORD_DETAIL_CHARS = 3600;
 
 function hash(value) {
   return crypto.createHash('sha256').update(value).digest('hex').slice(0, 20);
@@ -51,6 +51,26 @@ function splitUtf8(text, maxBytes = NTFY_CHUNK_BYTES) {
   return chunks.length ? chunks : [''];
 }
 
+function splitText(text, maxChars) {
+  const value = String(text || '');
+  if (!value) return [''];
+
+  const chunks = [];
+  let remaining = value;
+
+  while (remaining.length > maxChars) {
+    let cut = remaining.lastIndexOf('\n', maxChars);
+    if (cut < Math.floor(maxChars * 0.6)) cut = remaining.lastIndexOf(' ', maxChars);
+    if (cut < Math.floor(maxChars * 0.6)) cut = maxChars;
+
+    chunks.push(remaining.slice(0, cut).trimEnd());
+    remaining = remaining.slice(cut).trimStart();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks.length ? chunks : [''];
+}
+
 function normalizeDetail(text) {
   return String(text || '')
     .replace(/\r/g, '')
@@ -81,7 +101,6 @@ async function fetchListingDetail(item) {
     await detailPage.waitForTimeout(1200);
 
     const detail = await detailPage.evaluate(({ title, price }) => {
-      // 구해요는 실제 판매글 본문을 Product JSON-LD description에 노출한다.
       for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
         try {
           const parsed = JSON.parse(script.textContent || 'null');
@@ -99,7 +118,6 @@ async function fetchListingDetail(item) {
         return { source: 'meta', text: meta.getAttribute('content') || '' };
       }
 
-      // 마지막 보조 수단: 상세 화면에서 제목/가격 뒤부터 공유 버튼 전까지만 잘라낸다.
       const lines = (document.body?.innerText || '')
         .split(/\r?\n/)
         .map((x) => x.trim())
@@ -166,28 +184,38 @@ async function sendDiscord(item) {
     return;
   }
 
-  const description = truncate(item.detail || '판매글 본문이 없습니다.', DISCORD_DESCRIPTION_LIMIT);
-  const response = await fetch(DISCORD_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: 'Guheyo Keycap Alert',
-      allowed_mentions: { parse: [] },
-      embeds: [
-        {
-          title: truncate(item.title, 256),
-          url: item.url,
-          description,
-          fields: item.price ? [{ name: '가격', value: item.price, inline: true }] : [],
-          footer: { text: '구해요 키캡 판매' },
-          timestamp: new Date().toISOString()
-        }
-      ]
-    })
-  });
+  const detailChunks = splitText(item.detail || '판매글 본문이 없습니다.', DISCORD_DETAIL_CHARS);
 
-  if (!response.ok) {
-    throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+  for (let i = 0; i < detailChunks.length; i += 1) {
+    const first = i === 0;
+    const total = detailChunks.length;
+    const embed = {
+      title: first
+        ? `🆕 ${truncate(item.title, 250)}`
+        : `↳ 본문 계속 (${i + 1}/${total})`,
+      url: item.url,
+      description: `**판매글 내용**\n${detailChunks[i]}`,
+      footer: { text: first ? '구해요 · 키캡 판매 알림' : `구해요 · 본문 ${i + 1}/${total}` },
+      timestamp: new Date().toISOString()
+    };
+
+    if (first && item.price) {
+      embed.fields = [{ name: '💰 가격', value: `**${item.price}**`, inline: true }];
+    }
+
+    const response = await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'Guheyo Keycap Alert',
+        allowed_mentions: { parse: [] },
+        embeds: [embed]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+    }
   }
 }
 
@@ -197,8 +225,6 @@ async function sendNotification(item) {
     return;
   }
 
-  // 개인용 ntfy 알림은 기존처럼 필수로 유지한다. Discord는 추가 채널이므로
-  // 일시적인 Webhook 장애가 기존 감지 상태 저장을 막지 않도록 best-effort로 보낸다.
   await sendNtfy(item);
 
   try {
