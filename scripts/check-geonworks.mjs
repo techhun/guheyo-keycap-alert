@@ -16,6 +16,7 @@ const FIELD_LABELS = {
 };
 
 const COMPARED_FIELDS = Object.keys(FIELD_LABELS);
+const DATE_LABELS = new Set(['GB 시작일', '예상 발송일', '갱신 일자', '마지막 갱신']);
 
 function clean(value) {
   return String(value ?? '')
@@ -32,6 +33,17 @@ function truncate(value, maxLength = 1000) {
 
 function normalizeKey(value) {
   return clean(value).toLocaleLowerCase('en-US');
+}
+
+function displayValue(label, value) {
+  const text = clean(value) || '—';
+  if (!DATE_LABELS.has(label)) return truncate(text);
+
+  const match = text.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})$/);
+  if (!match) return truncate(text);
+
+  const [, year, month, day] = match;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
 async function fetchRows() {
@@ -194,7 +206,7 @@ function addedEmbed(row) {
       ['상태', row.status],
       ['갱신 일자', row.update],
       ['비고', row.note]
-    ].map(([name, value]) => ({ name, value: truncate(value), inline: !['비고'].includes(name) }))
+    ].map(([name, value]) => ({ name, value: displayValue(name, value), inline: name !== '비고' }))
   };
 }
 
@@ -204,7 +216,7 @@ function changedEmbed(change) {
     description: `변경된 항목 **${change.fields.length}개**`,
     fields: change.fields.slice(0, 25).map((field) => ({
       name: field.label,
-      value: truncate(`이전: ${field.before}\n현재: ${field.after}`),
+      value: truncate(`이전: ${displayValue(field.label, field.before)}\n현재: ${displayValue(field.label, field.after)}`),
       inline: false
     }))
   };
@@ -216,8 +228,8 @@ function removedEmbed(row) {
     description: 'GEONWORKS GB Schedule의 현재 목록에서 사라졌습니다.',
     fields: [
       { name: '마지막 상태', value: truncate(row.status), inline: true },
-      { name: '예상 발송일', value: truncate(row.eta), inline: true },
-      { name: '마지막 갱신', value: truncate(row.update), inline: true },
+      { name: '예상 발송일', value: displayValue('예상 발송일', row.eta), inline: true },
+      { name: '마지막 갱신', value: displayValue('마지막 갱신', row.update), inline: true },
       { name: '비고', value: truncate(row.note), inline: false }
     ]
   };
