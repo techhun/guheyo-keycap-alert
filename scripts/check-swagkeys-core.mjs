@@ -387,7 +387,7 @@ async function postDiscord(embed) {
 async function main() {
   const state = loadState();
   const previousRows = Array.isArray(state?.rows) ? state.rows : [];
-  const snapshot = await fetchSnapshot(previousRows);
+  let snapshot = await fetchSnapshot(previousRows);
   console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}`);
   console.log(`SWAGKEYS status rows: ${snapshot.rows.length}${snapshot.statusFresh ? '' : ' (stored fallback)'}`);
 
@@ -403,15 +403,45 @@ async function main() {
     return;
   }
 
-  if (snapshot.rows.length < Math.max(8, Math.floor(previousRows.length * 0.5))) {
-    throw new Error(`SWAGKEYS row count dropped unexpectedly: ${previousRows.length} -> ${snapshot.rows.length}. State was not updated.`);
+  const validateRows = (candidateSnapshot) => {
+    if (candidateSnapshot.rows.length < Math.max(8, Math.floor(previousRows.length * 0.5))) {
+      throw new Error(`SWAGKEYS row count dropped unexpectedly: ${previousRows.length} -> ${candidateSnapshot.rows.length}. State was not updated.`);
+    }
+  };
+  const removalSignature = (candidateQuarterChanges, candidateChanges) => [
+    ...candidateQuarterChanges.removed.map((item) => `roadmap|${clean(item.product).toLowerCase()}|${item.quarter}`),
+    ...candidateChanges
+      .filter((change) => change.kind === 'removed')
+      .map((change) => `status|${clean(change.row.product).toLowerCase()}`)
+  ].sort().join('\n');
+  const calculateChanges = (candidateSnapshot) => {
+    const announcementChanged = clean(state.announcement?.heading) !== clean(candidateSnapshot.announcement.heading)
+      || clean(state.announcement?.content) !== clean(candidateSnapshot.announcement.content);
+    const quarterChanges = diffQuarters(state.quarters, candidateSnapshot.quarters);
+    const changes = diffRows(previousRows, candidateSnapshot.rows);
+    return { announcementChanged, quarterChanges, quartersChanged: hasQuarterChanges(quarterChanges), changes };
+  };
+
+  validateRows(snapshot);
+  let calculated = calculateChanges(snapshot);
+  const firstRemovalSignature = removalSignature(calculated.quarterChanges, calculated.changes);
+  if (firstRemovalSignature) {
+    console.warn('SWAGKEYS removal detected; re-reading once before notifying.');
+    const verificationSnapshot = await fetchSnapshot(previousRows);
+    validateRows(verificationSnapshot);
+    const verificationCalculated = calculateChanges(verificationSnapshot);
+    const secondRemovalSignature = removalSignature(verificationCalculated.quarterChanges, verificationCalculated.changes);
+    if (secondRemovalSignature && secondRemovalSignature !== firstRemovalSignature) {
+      throw new Error('SWAGKEYS removal set changed during verification. State was not updated.');
+    }
+    snapshot = verificationSnapshot;
+    calculated = verificationCalculated;
+    console.log(secondRemovalSignature
+      ? 'SWAGKEYS removal confirmed by two consecutive reads.'
+      : 'SWAGKEYS removal disappeared on verification; using the verified second snapshot.');
   }
 
-  const announcementChanged = clean(state.announcement?.heading) !== clean(snapshot.announcement.heading)
-    || clean(state.announcement?.content) !== clean(snapshot.announcement.content);
-  const quarterChanges = diffQuarters(state.quarters, snapshot.quarters);
-  const quartersChanged = hasQuarterChanges(quarterChanges);
-  const changes = diffRows(previousRows, snapshot.rows);
+  let { announcementChanged, quarterChanges, quartersChanged, changes } = calculated;
   console.log(`SWAGKEYS announcement changed: ${announcementChanged}`);
   console.log(`SWAGKEYS quarter roadmap changed: ${quartersChanged}`);
   console.log(`SWAGKEYS product changes: ${changes.length}`);
@@ -421,7 +451,7 @@ async function main() {
     return;
   }
   if (!DISCORD_WEBHOOK_URL) {
-    console.log('[discord] SWG_DISCORD_WEBHOOK_URL is not configured. Changes remain pending; state was not updated.');
+    console.log('[discord] SWAGKEYS_DISCORD_WEBHOOK_URL/SWG_DISCORD_WEBHOOK_URL is not configured. Changes remain pending; state was not updated.');
     return;
   }
 

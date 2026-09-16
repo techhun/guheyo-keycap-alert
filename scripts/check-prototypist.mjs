@@ -461,7 +461,7 @@ async function notify(change) {
 }
 
 async function main() {
-const rows = await fetchRows();
+let rows = await fetchRows();
 console.log(`Proto[Typist] total rows: ${rows.length}`);
 console.log('Proto[Typist] counts:', JSON.stringify(sourceCounts(rows)));
 
@@ -474,17 +474,42 @@ if (!state?.initialized || previousRows.length === 0) {
   process.exit(0);
 }
 
-const previousCounts = sourceCounts(previousRows);
-const currentCounts = sourceCounts(rows);
-for (const source of SOURCES) {
-  const before = previousCounts[source.id] || 0;
-  const after = currentCounts[source.id] || 0;
-  if (before > 0 && after < Math.max(1, Math.floor(before * 0.5))) {
-    throw new Error(`Proto[Typist] ${source.label} row count dropped unexpectedly: ${before} -> ${after}. State was not updated.`);
+const validateSourceCounts = (candidateRows) => {
+  const previousCounts = sourceCounts(previousRows);
+  const currentCounts = sourceCounts(candidateRows);
+  for (const source of SOURCES) {
+    const before = previousCounts[source.id] || 0;
+    const after = currentCounts[source.id] || 0;
+    if (before > 0 && after < Math.max(1, Math.floor(before * 0.5))) {
+      throw new Error(`Proto[Typist] ${source.label} row count dropped unexpectedly: ${before} -> ${after}. State was not updated.`);
+    }
   }
+};
+const removalSignature = (candidateChanges) => candidateChanges
+  .filter((change) => change.kind === 'removed')
+  .map((change) => `${change.row.sourceId}|${normalizeUrl(change.row.itemUrl)}|${clean(change.row.product)}`)
+  .sort()
+  .join('\n');
+
+validateSourceCounts(rows);
+let changes = diffRows(previousRows, rows);
+const firstRemovalSignature = removalSignature(changes);
+if (firstRemovalSignature) {
+  console.warn('Proto[Typist] removal detected; re-reading once before notifying.');
+  const verificationRows = await fetchRows();
+  validateSourceCounts(verificationRows);
+  const verificationChanges = diffRows(previousRows, verificationRows);
+  const secondRemovalSignature = removalSignature(verificationChanges);
+  if (secondRemovalSignature && secondRemovalSignature !== firstRemovalSignature) {
+    throw new Error('Proto[Typist] removal set changed during verification. State was not updated.');
+  }
+  rows = verificationRows;
+  changes = verificationChanges;
+  console.log(secondRemovalSignature
+    ? 'Proto[Typist] removal confirmed by two consecutive reads.'
+    : 'Proto[Typist] removal disappeared on verification; using the verified second snapshot.');
 }
 
-const changes = diffRows(previousRows, rows);
 console.log(`Proto[Typist] changes: ${changes.length}`);
 for (const change of changes) {
   console.log(

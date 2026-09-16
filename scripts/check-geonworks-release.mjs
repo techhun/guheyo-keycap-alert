@@ -273,7 +273,7 @@ async function notify(change) {
   return postDiscord(removedEmbed(change.row));
 }
 
-const rows = await fetchRows();
+let rows = await fetchRows();
 console.log(`GEONWORKS Release rows: ${rows.length}`);
 console.log('GEONWORKS Release sample:', JSON.stringify(rows[0], null, 2));
 
@@ -286,11 +286,36 @@ if (!state?.initialized || previousRows.length === 0) {
   process.exit(0);
 }
 
-if (rows.length < Math.max(1, Math.floor(previousRows.length * 0.5))) {
-  throw new Error(`GEONWORKS Release row count dropped unexpectedly: ${previousRows.length} -> ${rows.length}. State was not updated.`);
+const validateRows = (candidateRows) => {
+  if (candidateRows.length < Math.max(1, Math.floor(previousRows.length * 0.5))) {
+    throw new Error(`GEONWORKS Release row count dropped unexpectedly: ${previousRows.length} -> ${candidateRows.length}. State was not updated.`);
+  }
+};
+const removalSignature = (candidateChanges) => candidateChanges
+  .filter((change) => change.kind === 'removed')
+  .map((change) => JSON.stringify(change.row))
+  .sort()
+  .join('\n');
+
+validateRows(rows);
+let changes = diffRows(previousRows, rows);
+const firstRemovalSignature = removalSignature(changes);
+if (firstRemovalSignature) {
+  console.warn('GEONWORKS Release removal detected; re-reading once before notifying.');
+  const verificationRows = await fetchRows();
+  validateRows(verificationRows);
+  const verificationChanges = diffRows(previousRows, verificationRows);
+  const secondRemovalSignature = removalSignature(verificationChanges);
+  if (secondRemovalSignature && secondRemovalSignature !== firstRemovalSignature) {
+    throw new Error('GEONWORKS Release removal set changed during verification. State was not updated.');
+  }
+  rows = verificationRows;
+  changes = verificationChanges;
+  console.log(secondRemovalSignature
+    ? 'GEONWORKS Release removal confirmed by two consecutive reads.'
+    : 'GEONWORKS Release removal disappeared on verification; using the verified second snapshot.');
 }
 
-const changes = diffRows(previousRows, rows);
 console.log(`GEONWORKS Release changes: ${changes.length}`);
 
 for (const change of changes) {
