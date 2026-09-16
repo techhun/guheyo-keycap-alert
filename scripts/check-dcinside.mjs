@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const STATE_PATH = 'dcinside-tteotnya-state.json';
-const DISCORD_WEBHOOK_URL = (process.env.DISCORD_WEBHOOK_URL || '').trim();
+const DISCORD_WEBHOOK_URL = (process.env.DCINSIDE_DISCORD_WEBHOOK_URL || '').trim();
 const TARGET_NAME = '떴냐';
 const MOBILE_URL = 'https://m.dcinside.com/board/mechanicalkeyboard?headid=110';
 const DESKTOP_URL = 'https://gall.dcinside.com/mgallery/board/lists/?id=mechanicalkeyboard&search_head=110&page=1';
@@ -219,7 +219,7 @@ if (newRows.length > 15) {
 }
 
 if (!DISCORD_WEBHOOK_URL) {
-  console.log('[discord] DISCORD_WEBHOOK_URL is not configured. New DCInside posts remain pending; state was not updated.');
+  console.log('[discord] DCINSIDE_DISCORD_WEBHOOK_URL is not configured. New DCInside posts remain pending; state was not updated.');
   process.exit(0);
 }
 
