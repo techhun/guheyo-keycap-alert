@@ -44,7 +44,7 @@ jobs:
       - name: Check DCInside tteotnya posts
         if: always()
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DCINSIDE_DISCORD_WEBHOOK_URL: ${{ secrets.DCINSIDE_DISCORD_WEBHOOK_URL }}
         shell: bash
         run: |
           if npm run check:dcinside; then
