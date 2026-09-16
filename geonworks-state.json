@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T05:13:50.573Z",
+  "updatedAt": "2026-09-16T07:50:05.202Z",
   "rows": [
     {
       "product": "Supernova",
@@ -672,6 +672,16 @@
       "status": "inspecting",
       "update": "2026. 9. 15",
       "note": "검수 중 / Under Inspecting"
+    },
+    {
+      "product": "Nexus60",
+      "gbStart": "—",
+      "eta": "—",
+      "type": "Keyboard",
+      "manufacturer": "KEZEWA",
+      "status": "GB on sale",
+      "update": "2026. 9. 16",
+      "note": "—"
     }
   ]
 }
