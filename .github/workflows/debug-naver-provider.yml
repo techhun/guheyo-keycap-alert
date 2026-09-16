@@ -1,0 +1,51 @@
+name: Debug Naver provider
+
+on:
+  push:
+    paths:
+      - '.github/workflows/debug-naver-provider.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - name: Print Naver provider error
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { inspectProduct } from './scripts/restock/providers/index.mjs';
+          try {
+            const result = await inspectProduct('https://naver.me/xiLfDSsP');
+            console.log('SUCCESS', JSON.stringify(result, null, 2));
+          } catch (error) {
+            console.log('ERROR_NAME', error?.name);
+            console.log('ERROR_CODE', error?.code);
+            console.log('ERROR_MESSAGE', error?.message);
+            console.log('ERROR_STACK', error?.stack);
+          }
+          JS
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/debug-naver-provider.yml
+          git commit -m 'Remove Naver provider debug workflow'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then exit 0; fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
