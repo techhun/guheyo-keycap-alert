@@ -36,7 +36,8 @@ function normalizeSelections(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value)
     .map(([key, selected]) => [clean(key), clean(selected)])
-    .filter(([key, selected]) => key && selected));
+    .filter(([key, selected]) => key && selected)
+    .sort(([a], [b]) => a.localeCompare(b)));
 }
 
 async function fetchProduct(productUrl) {
@@ -108,10 +109,13 @@ function stableItemId(item, productUrl, selections) {
   const explicit = clean(item?.id);
   if (explicit) return explicit;
   const selector = Object.entries(selections)
-    .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${value}`)
     .join('&');
   return `${productUrl}#${selector}`;
+}
+
+function variantIds(variants) {
+  return variants.map((variant) => String(variant.id)).sort();
 }
 
 function formatSelections(selections) {
@@ -175,19 +179,29 @@ function saveState(state) {
 async function main() {
   const watchlist = readJson(WATCHLIST_PATH, { version: 1, items: [] });
   const items = Array.isArray(watchlist.items) ? watchlist.items.filter((item) => item?.enabled !== false) : [];
+  const state = readJson(STATE_PATH, { version: 1, initialized: true, updatedAt: null, items: {} });
+  state.items ||= {};
+
   if (items.length === 0) {
-    console.log('[restock] watchlist is empty.');
+    if (Object.keys(state.items).length > 0) {
+      state.items = {};
+      saveState(state);
+      console.log('[restock] watchlist is empty; stale watcher state cleared.');
+    } else {
+      console.log('[restock] watchlist is empty.');
+    }
     return;
   }
 
-  const state = readJson(STATE_PATH, { version: 1, initialized: true, updatedAt: null, items: {} });
-  state.items ||= {};
   let changed = false;
+  const activeIds = new Set();
 
   for (const item of items) {
     const productUrl = normalizeProductUrl(item.url);
     const selections = normalizeSelections(item.selections);
     const itemId = stableItemId(item, productUrl, selections);
+    activeIds.add(itemId);
+
     const product = await fetchProduct(productUrl);
     const matches = matchingVariants(product, selections);
     if (matches.length === 0) {
@@ -206,9 +220,8 @@ async function main() {
         productTitle: clean(product.title),
         selections,
         available,
-        matchingVariantIds: matches.map((variant) => String(variant.id)),
-        availableVariantIds: availableVariants.map((variant) => String(variant.id)),
-        checkedAt: new Date().toISOString()
+        matchingVariantIds: variantIds(matches),
+        availableVariantIds: variantIds(availableVariants)
       };
       changed = true;
       console.log('[restock] baseline stored without notification.');
@@ -229,12 +242,18 @@ async function main() {
       productTitle: clean(product.title),
       selections,
       available,
-      matchingVariantIds: matches.map((variant) => String(variant.id)),
-      availableVariantIds: availableVariants.map((variant) => String(variant.id)),
-      checkedAt: new Date().toISOString()
+      matchingVariantIds: variantIds(matches),
+      availableVariantIds: variantIds(availableVariants)
     };
     if (JSON.stringify(previous) !== JSON.stringify(next)) {
       state.items[itemId] = next;
+      changed = true;
+    }
+  }
+
+  for (const itemId of Object.keys(state.items)) {
+    if (!activeIds.has(itemId)) {
+      delete state.items[itemId];
       changed = true;
     }
   }
