@@ -162,7 +162,7 @@ async function extractRows(page) {
   });
 }
 
-async function fetchSnapshot() {
+async function fetchSnapshot(fallbackRows = []) {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 1800, height: 1400 },
@@ -172,11 +172,20 @@ async function fetchSnapshot() {
 
   try {
     const roadmap = await openWithRetry(context, ROADMAP_URL, 'roadmap', extractRoadmap);
-    const rows = await openWithRetry(context, STATUS_URL, 'status table', extractRows);
+    let rows;
+    let statusFresh = true;
+    try {
+      rows = await openWithRetry(context, STATUS_URL, 'status table', extractRows);
+    } catch (error) {
+      if (!Array.isArray(fallbackRows) || fallbackRows.length < 10) throw error;
+      rows = fallbackRows;
+      statusFresh = false;
+      console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows for this run.`);
+    }
     if (!roadmap.announcement.heading || !roadmap.announcement.content) throw new Error('roadmap announcement was empty');
     if (Object.values(roadmap.quarters).flat().length < 5) throw new Error('quarter roadmap returned too few products');
     if (rows.length < 10) throw new Error(`status table returned too few rows: ${rows.length}`);
-    return { announcement: roadmap.announcement, quarters: roadmap.quarters, rows };
+    return { announcement: roadmap.announcement, quarters: roadmap.quarters, rows, statusFresh };
   } finally {
     await context.close();
     await browser.close();
@@ -406,12 +415,12 @@ async function postDiscord(embed) {
 }
 
 async function main() {
-  const snapshot = await fetchSnapshot();
-  console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}`);
-  console.log(`SWAGKEYS status rows: ${snapshot.rows.length}`);
-
   const state = loadState();
   const previousRows = Array.isArray(state?.rows) ? state.rows : [];
+  const snapshot = await fetchSnapshot(previousRows);
+  console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}`);
+  console.log(`SWAGKEYS status rows: ${snapshot.rows.length}${snapshot.statusFresh ? '' : ' (stored fallback)'}`);
+
   if (!state?.initialized || previousRows.length === 0) {
     console.log(`Baseline initialization: storing ${snapshot.rows.length} SWAGKEYS rows without notifying.`);
     saveState(snapshot);
