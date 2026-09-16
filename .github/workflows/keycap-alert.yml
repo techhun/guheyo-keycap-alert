@@ -18,7 +18,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
 
     steps:
       - name: Checkout
@@ -54,7 +54,7 @@ jobs:
         if: always()
         env:
           PROTOTYPIST_DISCORD_WEBHOOK_URL: ${{ secrets.PROTOTYPIST_DISCORD_WEBHOOK_URL }}
-        run: npm run check:prototypist
+        run: npm run check:prototypist || (echo 'ProtoTypist read failed once; retrying...' && npm run check:prototypist)
 
       - name: Persist watcher state
         if: always()
