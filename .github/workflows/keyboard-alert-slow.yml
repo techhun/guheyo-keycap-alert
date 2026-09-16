@@ -1,0 +1,123 @@
+name: Keyboard alerts (slow)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/keyboard-alert-slow.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keyboard-alerts-slow
+  cancel-in-progress: false
+
+jobs:
+  monitor-slow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check GEONWORKS GB schedule
+        env:
+          GEONWORKS_DISCORD_WEBHOOK_URL: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if npm run check:geonworks; then
+            exit 0
+          fi
+          echo 'GEONWORKS GB read failed once; retrying...'
+          if npm run check:geonworks; then
+            exit 0
+          fi
+          echo 'GEONWORKS GB is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+
+      - name: Check GEONWORKS Release schedule
+        if: always()
+        env:
+          GEONWORKS_DISCORD_WEBHOOK_URL: ${{ secrets.GEONWORKS_DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if npm run check:geonworks-release; then
+            exit 0
+          fi
+          echo 'GEONWORKS Release read failed once; retrying...'
+          if npm run check:geonworks-release; then
+            exit 0
+          fi
+          echo 'GEONWORKS Release is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+
+      - name: Check ProtoTypist updates
+        if: always()
+        env:
+          PROTOTYPIST_DISCORD_WEBHOOK_URL: ${{ secrets.PROTOTYPIST_DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if npm run check:prototypist; then
+            exit 0
+          fi
+          echo 'ProtoTypist read failed once; retrying...'
+          if npm run check:prototypist; then
+            exit 0
+          fi
+          echo 'ProtoTypist is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+
+      - name: Check SWAGKEYS roadmap
+        if: always()
+        env:
+          SWAGKEYS_DISCORD_WEBHOOK_URL: ${{ secrets.SWAGKEYS_DISCORD_WEBHOOK_URL }}
+          SWG_DISCORD_WEBHOOK_URL: ${{ secrets.SWG_DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if npm run check:swagkeys; then
+            exit 0
+          fi
+          echo 'SWAGKEYS read failed once; retrying...'
+          if npm run check:swagkeys; then
+            exit 0
+          fi
+          echo 'SWAGKEYS is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
+
+      - name: Persist slow watcher state
+        if: always()
+        shell: bash
+        run: |
+          changed_files=()
+          for file in geonworks-state.json geonworks-release-state.json prototypist-state.json swg-state.json swagkeys-state.json; do
+            if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
+              changed_files+=("$file")
+            fi
+          done
+          if [ ${#changed_files[@]} -eq 0 ]; then
+            echo 'Slow watcher state unchanged.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "${changed_files[@]}"
+          git commit -m 'Update slow watcher state'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
+            git rebase --abort >/dev/null 2>&1 || true
+            echo "Slow state push attempt ${attempt} failed; retrying..."
+            sleep $((attempt * 2))
+          done
+          echo 'Failed to persist slow watcher state after retries.'
+          exit 1
