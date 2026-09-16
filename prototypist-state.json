@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T05:21:48.411Z",
+  "updatedAt": "2026-09-16T07:37:29.555Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -1540,7 +1540,7 @@
       "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
       "itemUrl": "https://prototypist.notion.site/SWG-Prepress-3d9042334154801a868cdd0ca607ef7f",
       "product": "SWG Prepress",
-      "status": "Shipping to Customers",
+      "status": "Completed",
       "expectedShipping": "Q3"
     },
     {
@@ -1780,16 +1780,6 @@
       "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
       "itemUrl": "https://prototypist.notion.site/MM-Glazed-Beige-2c4042334154805ebe4ac8c842087bc8",
       "product": "MM Glazed Beige",
-      "status": "Completed",
-      "expectedShipping": "Q1 2026"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/Keykobo-Dolch-Cadet-2920423341548059afced53b2f7f6df2",
-      "product": "Keykobo Dolch Cadet",
       "status": "Completed",
       "expectedShipping": "Q1 2026"
     }
