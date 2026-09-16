@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T07:37:29.555Z",
+  "updatedAt": "2026-09-16T11:41:10.230Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -358,16 +358,6 @@
       "sourceLabel": "Keyboard",
       "sourceEmoji": "⌨️",
       "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
-      "itemUrl": "https://prototypist.notion.site/Smurve80-3170423341548059ba61e3e35e5c0df0",
-      "product": "Smurve80",
-      "status": "In Quality Control",
-      "expectedShipping": "Q3 2026"
-    },
-    {
-      "sourceId": "keyboard",
-      "sourceLabel": "Keyboard",
-      "sourceEmoji": "⌨️",
-      "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
       "itemUrl": "https://prototypist.notion.site/MM-Class100-3170423341548049bf7eee6556316a70",
       "product": "MM Class100",
       "status": "In Quality Control",
@@ -410,6 +400,16 @@
       "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
       "itemUrl": "https://prototypist.notion.site/GDK-Lab-NV-70-30d0423341548032a631ede43f4deaa9",
       "product": "GDK Lab NV-70",
+      "status": "Shipping to Customers",
+      "expectedShipping": "Q3 2026"
+    },
+    {
+      "sourceId": "keyboard",
+      "sourceLabel": "Keyboard",
+      "sourceEmoji": "⌨️",
+      "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
+      "itemUrl": "https://prototypist.notion.site/Smurve80-3170423341548059ba61e3e35e5c0df0",
+      "product": "Smurve80",
       "status": "Shipping to Customers",
       "expectedShipping": "Q3 2026"
     },
