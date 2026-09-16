@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T11:41:10.230Z",
+  "updatedAt": "2026-09-16T11:51:04.292Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -748,26 +748,6 @@
       "sourceLabel": "GMK",
       "sourceEmoji": "🇩🇪",
       "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
-      "itemUrl": "https://prototypist.notion.site/GMK-CYL-Ramune-36404233415480c186dac89814cc92ec",
-      "product": "GMK CYL Ramune",
-      "status": "In Manufacturing",
-      "expectedShipping": "Q4 2026"
-    },
-    {
-      "sourceId": "gmk",
-      "sourceLabel": "GMK",
-      "sourceEmoji": "🇩🇪",
-      "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
-      "itemUrl": "https://prototypist.notion.site/GMK-CYL-King-of-the-Seas-3640423341548040a0a7ed99012077a8",
-      "product": "GMK CYL King of the Seas",
-      "status": "In Manufacturing",
-      "expectedShipping": "Q4 2026"
-    },
-    {
-      "sourceId": "gmk",
-      "sourceLabel": "GMK",
-      "sourceEmoji": "🇩🇪",
-      "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
       "itemUrl": "https://prototypist.notion.site/GMK-Spark-36d0423341548094b047ed8f7ae66e9f",
       "product": "GMK Spark",
       "status": "In Manufacturing",
@@ -911,6 +891,26 @@
       "itemUrl": "https://prototypist.notion.site/GMK-CYL-Mini-Orange-Accent-Pack-3ba04233415480bf9d69fbd59b4b76b8",
       "product": "GMK CYL Mini Orange Accent Pack",
       "status": "In Manufacturing",
+      "expectedShipping": "Q4 2026"
+    },
+    {
+      "sourceId": "gmk",
+      "sourceLabel": "GMK",
+      "sourceEmoji": "🇩🇪",
+      "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
+      "itemUrl": "https://prototypist.notion.site/GMK-CYL-King-of-the-Seas-3640423341548040a0a7ed99012077a8",
+      "product": "GMK CYL King of the Seas",
+      "status": "Shipping to Prototypist",
+      "expectedShipping": "Q4 2026"
+    },
+    {
+      "sourceId": "gmk",
+      "sourceLabel": "GMK",
+      "sourceEmoji": "🇩🇪",
+      "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
+      "itemUrl": "https://prototypist.notion.site/GMK-CYL-Ramune-36404233415480c186dac89814cc92ec",
+      "product": "GMK CYL Ramune",
+      "status": "Shipping to Prototypist",
       "expectedShipping": "Q4 2026"
     },
     {
