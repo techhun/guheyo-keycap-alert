@@ -75,6 +75,8 @@ GitHub 저장소의 **Settings → Secrets and variables → Actions**에서 관
 - 알림을 보내야 하는 변경이 있는데 해당 알림 채널이 설정되지 않았거나 전송에 실패하면 가능한 범위에서 state를 넘기지 않아 다음 실행에서 다시 처리합니다.
 - Guheyo는 신규 글만 감시하며, 이미 본 URL의 수정은 의도적으로 무시합니다.
 - DCInside는 `search_head=110` 필터와 각 행의 `⚡떴냐` 카테고리를 함께 검증합니다.
+- GEONWORKS / ProtoTypist / SWAGKEYS에서 기존 항목의 **목록 제거**가 감지되면 해당 소스를 즉시 한 번 더 읽고, 두 번 연속 같은 제거가 확인될 때만 제거 알림과 state 갱신을 수행합니다.
+- 두 번째 확인에서 항목이 다시 나타나거나 제거 목록이 달라지면 해당 제거를 확정하지 않아 일시적인 부분 로딩을 삭제로 오인하지 않습니다.
 - SWAGKEYS는 Notion의 `Loading`, `No results`, 오류 placeholder 등을 정상 제품으로 저장하지 않으며, 상태표를 일시적으로 읽지 못하면 마지막 검증된 상태를 재사용합니다.
 - workflow의 state push는 `git pull --rebase` + `git push`를 재시도해 fast/slow 동시 실행 시 충돌 가능성을 줄입니다.
 
@@ -87,11 +89,10 @@ scripts/
 ├─ check-geonworks.mjs
 ├─ check-geonworks-release.mjs
 ├─ check-prototypist.mjs
-├─ check-swagkeys.mjs
-└─ check-swagkeys-core.mjs   # 검증된 SWAGKEYS 파서 내부 구현
+└─ check-swagkeys.mjs
 ```
 
-`check-swagkeys.mjs`가 외부 실행 진입점이며, 내부 core가 사용하는 과거 state 파일명은 runner 안에서만 임시 호환 처리합니다. 저장소의 공식 상태 파일은 `swagkeys-state.json`입니다.
+각 스크립트 이름과 상태 파일 이름은 감시 소스 기준으로 통일되어 있습니다.
 
 ## 수동 실행
 
