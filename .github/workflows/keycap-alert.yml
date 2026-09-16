@@ -2,11 +2,6 @@ name: Keyboard alerts
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'scripts/**'
-      - 'package.json'
-      - '.github/workflows/keycap-alert.yml'
 
 permissions:
   contents: write
