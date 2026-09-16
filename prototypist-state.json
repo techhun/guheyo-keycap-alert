@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T11:51:04.292Z",
+  "updatedAt": "2026-09-16T18:02:02.610Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -28,10 +28,10 @@
       "sourceLabel": "Keyboard",
       "sourceEmoji": "⌨️",
       "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
-      "itemUrl": "https://prototypist.notion.site/Float65-317042334154803cb6abd475c33f25d2",
-      "product": "Float65",
+      "itemUrl": "https://prototypist.notion.site/Float-65-317042334154803cb6abd475c33f25d2",
+      "product": "Float 65",
       "status": "In Manufacturing",
-      "expectedShipping": "Q3 2026"
+      "expectedShipping": "Q4 2026"
     },
     {
       "sourceId": "keyboard",
