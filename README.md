@@ -1,30 +1,110 @@
-# guheyo-keycap-alert
+# keyboard-alert
 
-구해요 키보드 장터의 **판매 → 키캡** 목록을 5분 간격으로 확인하고, 새 매물이 생기면 ntfy로 휴대폰 푸시 알림을 보내는 GitHub Actions 프로젝트입니다.
+키보드 관련 매물·커뮤니티·공제·생산 일정의 변경을 수집해 Discord(및 일부 ntfy)로 알리는 개인용 GitHub Actions 프로젝트입니다.
 
-## 동작 방식
+## 감시 대상
 
-1. GitHub Actions가 5분마다 실행됩니다.
-2. Playwright가 `https://guheyo.com/g/keyboard/sell`을 열고 `키캡` 필터를 선택합니다.
-3. 현재 매물 목록을 이전 상태(`state.json`)와 비교합니다.
-4. 처음 실행은 현재 목록을 기준값으로만 저장하고 알림을 보내지 않습니다.
-5. 이후 새 매물만 `ntfy`로 알립니다.
+| 소스 | 감시 내용 | 알림 기준 | 상태 파일 |
+| --- | --- | --- | --- |
+| Guheyo | 키보드 장터 `판매 → 키캡` | **신규 판매글 URL만** 알림. 기존 글의 제목·가격·본문 수정은 감지하지 않음 | `guheyo-state.json` |
+| DCInside | 기계식키보드 갤러리 `⚡떴냐` 탭 | 기준 글 번호보다 새 글 | `dcinside-tteotnya-state.json` |
+| GEONWORKS GB | GB Schedule | 신규/변경/목록 제거 | `geonworks-state.json` |
+| GEONWORKS Release | Release Schedule | 신규/변경/목록 제거 | `geonworks-release-state.json` |
+| ProtoTypist | Keyboard / GMK / Keyset 진행 보드 | 신규/상태·배송예정 변경/목록 제거 | `prototypist-state.json` |
+| SWAGKEYS | 분기별 Keycap Roadmap + Keycap Status | 공지, 분기 이동·신규 배치·로드맵 제외, 진행상황 변경 | `swagkeys-state.json` |
 
-## ntfy 설정
+## 실행 구조
 
-GitHub 저장소의 **Settings → Secrets and variables → Actions → New repository secret**에서 다음 Secret을 추가합니다.
+외부 스케줄러는 **cron-job.org**를 사용합니다. GitHub Actions 자체의 `schedule:` 트리거는 사용하지 않습니다.
 
-- Name: `NTFY_TOPIC`
-- Secret: ntfy 앱에서 구독할 충분히 긴 랜덤 토픽 이름
+### Fast
 
-예: `animal-keycap-<긴 랜덤문자열>`
+`.github/workflows/keyboard-alert-fast.yml`
 
-Android에서 ntfy 앱을 설치한 뒤 같은 토픽을 구독하면 됩니다.
+- Guheyo
+- DCInside `⚡떴냐`
+- 권장 주기: **1분**
+- concurrency: `keyboard-alerts-fast`
 
-## 수동 테스트
+현재 기존 cron-job.org 설정과의 호환을 위해 `.github/workflows/keycap-alert.yml`도 동일한 fast 감시만 수행합니다. cron 대상을 `keyboard-alert-fast.yml`로 옮긴 뒤에는 이 호환 workflow를 삭제할 수 있습니다.
 
-**Actions → Keycap alert → Run workflow**를 실행합니다. 첫 실행은 기준값만 저장하므로 푸시가 오지 않는 것이 정상입니다.
+### Slow
 
-## 참고
+`.github/workflows/keyboard-alert-slow.yml`
 
-GitHub 예약 실행은 정확히 매 5분을 보장하지 않으며 혼잡 시 지연될 수 있습니다.
+- GEONWORKS GB
+- GEONWORKS Release
+- ProtoTypist
+- SWAGKEYS
+- 권장 주기: **10분**
+- concurrency: `keyboard-alerts-slow`
+
+변경 빈도가 낮고 Notion 등 외부 페이지의 응답이 느릴 수 있는 감시원을 fast workflow와 분리해, 느린 소스가 Guheyo/DCInside 알림을 지연시키지 않도록 구성합니다.
+
+## 실행 명령
+
+```bash
+npm run check:guheyo
+npm run check:dcinside
+npm run check:geonworks
+npm run check:geonworks-release
+npm run check:prototypist
+npm run check:swagkeys
+```
+
+의존성은 `package-lock.json`으로 고정하며 GitHub Actions에서는 `npm ci`를 사용합니다. Playwright는 현재 `1.55.0`으로 고정되어 있습니다.
+
+## 알림 Secret
+
+GitHub 저장소의 **Settings → Secrets and variables → Actions**에서 관리합니다.
+
+| Secret | 용도 |
+| --- | --- |
+| `GUHEYO_DISCORD_WEBHOOK_URL` | Guheyo Discord 알림. 미설정 시 기존 `DISCORD_WEBHOOK_URL`을 fallback으로 사용 |
+| `GUHEYO_NTFY_TOPIC` | Guheyo ntfy 알림. 미설정 시 기존 `NTFY_TOPIC`을 fallback으로 사용 |
+| `DCINSIDE_DISCORD_WEBHOOK_URL` | 기키갤 `⚡떴냐` 전용 Discord 알림 |
+| `GEONWORKS_DISCORD_WEBHOOK_URL` | GEONWORKS GB / Release 알림 |
+| `PROTOTYPIST_DISCORD_WEBHOOK_URL` | ProtoTypist 알림 |
+| `SWAGKEYS_DISCORD_WEBHOOK_URL` | SWAGKEYS 알림. 미설정 시 기존 `SWG_DISCORD_WEBHOOK_URL`을 fallback으로 사용 |
+
+각 서비스의 webhook은 서로 분리해 운용하는 것을 기본으로 합니다.
+
+## 상태 저장 원칙
+
+- 최초 실행은 현재 데이터를 baseline으로 저장하고 과거 항목을 알리지 않습니다.
+- 알림을 보내야 하는 변경이 있는데 해당 알림 채널이 설정되지 않았거나 전송에 실패하면 가능한 범위에서 state를 넘기지 않아 다음 실행에서 다시 처리합니다.
+- Guheyo는 신규 글만 감시하며, 이미 본 URL의 수정은 의도적으로 무시합니다.
+- DCInside는 `search_head=110` 필터와 각 행의 `⚡떴냐` 카테고리를 함께 검증합니다.
+- SWAGKEYS는 Notion의 `Loading`, `No results`, 오류 placeholder 등을 정상 제품으로 저장하지 않으며, 상태표를 일시적으로 읽지 못하면 마지막 검증된 상태를 재사용합니다.
+- workflow의 state push는 `git pull --rebase` + `git push`를 재시도해 fast/slow 동시 실행 시 충돌 가능성을 줄입니다.
+
+## 주요 스크립트
+
+```text
+scripts/
+├─ check-guheyo.mjs
+├─ check-dcinside.mjs
+├─ check-geonworks.mjs
+├─ check-geonworks-release.mjs
+├─ check-prototypist.mjs
+├─ check-swagkeys.mjs
+└─ check-swagkeys-core.mjs   # 검증된 SWAGKEYS 파서 내부 구현
+```
+
+`check-swagkeys.mjs`가 외부 실행 진입점이며, 내부 core가 사용하는 과거 state 파일명은 runner 안에서만 임시 호환 처리합니다. 저장소의 공식 상태 파일은 `swagkeys-state.json`입니다.
+
+## 수동 실행
+
+GitHub의 **Actions** 탭에서 다음 workflow를 직접 실행할 수 있습니다.
+
+- `Keyboard alerts (fast)`
+- `Keyboard alerts (slow)`
+
+테스트용 알림이 필요한 경우 production state를 변경하지 않는 별도 one-shot workflow를 사용하고, 테스트 후 제거하는 방식을 권장합니다.
+
+## cron-job.org 권장 설정
+
+- Fast: `keyboard-alert-fast.yml` → 1분 간격
+- Slow: `keyboard-alert-slow.yml` → 10분 간격
+
+기존 fast cron이 `keycap-alert.yml`을 호출하고 있다면 현재도 정상 동작합니다. 정식 fast workflow로 endpoint를 옮긴 것을 확인한 뒤 legacy workflow를 제거합니다.
