@@ -206,6 +206,37 @@ function diffRows(previousRows, currentRows) {
   return changes;
 }
 
+export function diffQuarters(previousQuarters = {}, currentQuarters = {}) {
+  const locations = (quarters) => {
+    const map = new Map();
+    for (const quarter of ['Q1', 'Q2', 'Q3', 'Q4']) {
+      for (const product of quarters[quarter] || []) {
+        map.set(clean(product).toLowerCase(), { product: clean(product), quarter });
+      }
+    }
+    return map;
+  };
+  const previous = locations(previousQuarters);
+  const current = locations(currentQuarters);
+  const result = { moved: [], added: [], removed: [] };
+
+  for (const [key, item] of current) {
+    const before = previous.get(key);
+    if (!before) result.added.push(item);
+    else if (before.quarter !== item.quarter) {
+      result.moved.push({ product: item.product, before: before.quarter, after: item.quarter });
+    }
+  }
+  for (const [key, item] of previous) {
+    if (!current.has(key)) result.removed.push(item);
+  }
+  return result;
+}
+
+function hasQuarterChanges(changes) {
+  return changes.moved.length > 0 || changes.added.length > 0 || changes.removed.length > 0;
+}
+
 function formatKst(isoString) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -245,15 +276,33 @@ export function announcementEmbed(announcement, detectedAt = new Date().toISOStr
   };
 }
 
-export function quartersEmbed(quarters, detectedAt = new Date().toISOString()) {
+export function quartersEmbed(changes, detectedAt = new Date().toISOString()) {
+  const changedFields = [];
+  if (changes.moved.length) {
+    changedFields.push({
+      name: '분기 이동',
+      value: truncate(changes.moved.map((item) => `• ${item.product}: ${item.before} → ${item.after}`).join('\n')),
+      inline: false
+    });
+  }
+  if (changes.added.length) {
+    changedFields.push({
+      name: '신규 배치',
+      value: truncate(changes.added.map((item) => `• ${item.product} → ${item.quarter}`).join('\n')),
+      inline: false
+    });
+  }
+  if (changes.removed.length) {
+    changedFields.push({
+      name: '로드맵 제외',
+      value: truncate(changes.removed.map((item) => `• ${item.product} (기존 ${item.quarter})`).join('\n')),
+      inline: false
+    });
+  }
   return {
     ...baseEmbed('🗺️ SWAGKEYS 분기별 로드맵 업데이트', ROADMAP_URL, detectedAt),
     fields: [
-      ...Object.entries(quarters).map(([quarter, products]) => ({
-        name: quarter,
-        value: truncate(products.length ? products.join('\n') : '결과 없음'),
-        inline: true
-      })),
+      ...changedFields,
       ...auxiliaryFields(ROADMAP_URL, detectedAt)
     ]
   };
@@ -340,7 +389,8 @@ async function main() {
 
   const announcementChanged = clean(state.announcement?.heading) !== clean(snapshot.announcement.heading)
     || clean(state.announcement?.content) !== clean(snapshot.announcement.content);
-  const quartersChanged = JSON.stringify(state.quarters || {}) !== JSON.stringify(snapshot.quarters);
+  const quarterChanges = diffQuarters(state.quarters, snapshot.quarters);
+  const quartersChanged = hasQuarterChanges(quarterChanges);
   const changes = diffRows(previousRows, snapshot.rows);
   console.log(`SWAGKEYS announcement changed: ${announcementChanged}`);
   console.log(`SWAGKEYS quarter roadmap changed: ${quartersChanged}`);
@@ -356,7 +406,7 @@ async function main() {
   }
 
   if (announcementChanged) await postDiscord(announcementEmbed(snapshot.announcement));
-  if (quartersChanged) await postDiscord(quartersEmbed(snapshot.quarters));
+  if (quartersChanged) await postDiscord(quartersEmbed(quarterChanges));
   for (const change of changes) {
     if (change.kind === 'added') await postDiscord(addedEmbed(change.row));
     else if (change.kind === 'changed') await postDiscord(changedEmbed(change));
