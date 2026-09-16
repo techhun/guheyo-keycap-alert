@@ -23,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -60,7 +63,18 @@ jobs:
         if: always()
         env:
           SWG_DISCORD_WEBHOOK_URL: ${{ secrets.SWG_DISCORD_WEBHOOK_URL }}
-        run: npm run check:swg || (echo 'SWAGKEYS read failed once; retrying...' && npm run check:swg)
+        shell: bash
+        run: |
+          if npm run check:swg; then
+            exit 0
+          fi
+
+          echo 'SWAGKEYS read failed once; retrying...'
+          if npm run check:swg; then
+            exit 0
+          fi
+
+          echo 'SWAGKEYS is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
 
       - name: Persist watcher state
         if: always()
