@@ -93,7 +93,7 @@ async function extractRoadmap(page) {
   });
   await page.waitForTimeout(700);
 
-  for (let step = 0; step < 64 && Object.values(quarters).some((value) => value === null); step += 1) {
+  for (let step = 0; step < 72 && Object.values(quarters).some((value) => value === null); step += 1) {
     const found = await page.evaluate(() => {
       const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
       const invalid = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
@@ -108,7 +108,12 @@ async function extractRoadmap(page) {
         if (!match) continue;
 
         const bodyLines = blockLines.slice(1);
-        if (bodyLines.some((line) => invalid.test(line))) continue;
+        if (bodyLines.some((line) => invalid.test(line))) {
+          const retry = [...block.querySelectorAll('button, [role="button"]')]
+            .find((element) => /다시 시도하기|try again/i.test((element.innerText || element.textContent || '').trim()));
+          retry?.click();
+          continue;
+        }
 
         const products = [...new Set(bodyLines.filter((line) => line && !invalid.test(line)))];
         if (products.length > 0) result[`Q${match[1]}`] = products;
