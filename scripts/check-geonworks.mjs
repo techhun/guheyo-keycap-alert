@@ -1,7 +1,7 @@
 import fs from 'node:fs';
+import { chromium } from 'playwright';
 
 const PAGE_URL = 'https://geonworks.kr/customhtml/GB_schedule.html';
-const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1i9SK14aWxpElXrjMinidKjVCXDi1XXBQSZJVB7ocbJk/gviz/tq?tqx=out:json&sheet=GB%20Schedule';
 const STATE_PATH = 'geonworks-state.json';
 const DISCORD_WEBHOOK_URL = (process.env.GEONWORKS_DISCORD_WEBHOOK_URL || '').trim();
 
@@ -34,58 +34,46 @@ function normalizeKey(value) {
   return clean(value).toLocaleLowerCase('en-US');
 }
 
-function cellValue(row, index) {
-  const cell = row?.c?.[index];
-  if (!cell) return '';
-  if (cell.f != null) return clean(cell.f);
-  if (cell.v != null) return clean(cell.v);
-  return '';
-}
-
-function parseGviz(text) {
-  const match = String(text || '').match(/google\.visualization\.Query\.setResponse\((\{[\s\S]*\})\);?\s*$/);
-  if (!match) throw new Error('Could not parse Google Sheets GViz response.');
-
-  const payload = JSON.parse(match[1]);
-  if (payload.status === 'error') {
-    throw new Error(`Google Sheets GViz error: ${JSON.stringify(payload.errors || payload)}`);
-  }
-
-  const rows = payload?.table?.rows;
-  if (!Array.isArray(rows)) throw new Error('Google Sheets response does not contain rows.');
-
-  return rows
-    .map((row) => ({
-      product: cellValue(row, 0),
-      gbStart: cellValue(row, 1),
-      eta: cellValue(row, 2),
-      type: cellValue(row, 3),
-      manufacturer: cellValue(row, 4),
-      status: cellValue(row, 5),
-      update: cellValue(row, 6),
-      note: cellValue(row, 7) || '—'
-    }))
-    .filter((row) => row.product);
-}
-
 async function fetchRows() {
-  const response = await fetch(SHEET_URL, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; keyboard-alert/1.0)',
-      'Cache-Control': 'no-cache'
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+
+  try {
+    const page = await browser.newPage({
+      viewport: { width: 1440, height: 1600 },
+      locale: 'ko-KR',
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36'
+    });
+
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForSelector('#tableBody tr', { timeout: 30000 });
+    await page.waitForTimeout(500);
+
+    const rows = await page.evaluate(() => {
+      const cleanText = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+
+      return [...document.querySelectorAll('#tableBody tr')]
+        .map((tr) => [...tr.querySelectorAll('td')].map((td) => cleanText(td.innerText)))
+        .filter((cells) => cells.length >= 8 && cells[0])
+        .map((cells) => ({
+          product: cells[0],
+          gbStart: cells[1],
+          eta: cells[2],
+          type: cells[3],
+          manufacturer: cells[4],
+          status: cells[5],
+          update: cells[6],
+          note: cells[7] || '—'
+        }));
+    });
+
+    if (rows.length < 5) {
+      throw new Error(`GEONWORKS page returned suspiciously few rows: ${rows.length}`);
     }
-  });
 
-  if (!response.ok) {
-    throw new Error(`GEONWORKS sheet fetch failed: ${response.status} ${response.statusText}`);
+    return rows;
+  } finally {
+    await browser.close();
   }
-
-  const rows = parseGviz(await response.text());
-  if (rows.length < 5) {
-    throw new Error(`GEONWORKS sheet returned suspiciously few rows: ${rows.length}`);
-  }
-
-  return rows;
 }
 
 function loadState() {
@@ -164,7 +152,7 @@ async function postDiscord(embed) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        username: 'Keyboard Alert',
+        username: 'GEONWORKS Alert',
         allowed_mentions: { parse: [] },
         embeds: [embed]
       })
@@ -243,6 +231,7 @@ async function notify(change) {
 
 const rows = await fetchRows();
 console.log(`GEONWORKS GB rows: ${rows.length}`);
+console.log('GEONWORKS sample:', JSON.stringify(rows[0], null, 2));
 
 const state = loadState();
 const previousRows = Array.isArray(state?.rows) ? state.rows : [];
