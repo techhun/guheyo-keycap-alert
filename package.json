@@ -1,11 +1,12 @@
 {
-  "name": "guheyo-keycap-alert",
+  "name": "keyboard-alert",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "check": "node scripts/check.mjs",
-    "check:geonworks": "node scripts/check-geonworks.mjs"
+    "check:geonworks": "node scripts/check-geonworks.mjs",
+    "check:geonworks-release": "node scripts/check-geonworks-release.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
