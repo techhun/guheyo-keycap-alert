@@ -29,6 +29,44 @@ const truncate = (value, maxLength = 1000) => {
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+
+const ENGLISH_MONTHS = new Map([
+  ['january', 1], ['february', 2], ['march', 3], ['april', 4], ['may', 5], ['june', 6],
+  ['july', 7], ['august', 8], ['september', 9], ['october', 10], ['november', 11], ['december', 12]
+]);
+
+function canonicalDate(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)
+      || y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return '';
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function normalizeEta(value) {
+  const text = clean(value);
+  if (!text) return '';
+
+  let match = text.match(/^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일$/);
+  if (match) return canonicalDate(match[1], match[2], match[3]) || text;
+
+  match = text.match(/^(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})\.?$/);
+  if (match) return canonicalDate(match[1], match[2], match[3]) || text;
+
+  match = text.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (match) {
+    const month = ENGLISH_MONTHS.get(match[1].toLowerCase());
+    if (month) return canonicalDate(match[3], month, match[2]) || text;
+  }
+
+  return text;
+}
+
+function comparableFieldValue(fieldKey, value) {
+  return fieldKey === 'eta' ? normalizeEta(value) : clean(value);
+}
+
 const INVALID_ROADMAP_RE = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
 const isInvalidRoadmapValue = (value) => INVALID_ROADMAP_RE.test(clean(value));
 const quarterSnapshotIsValid = (quarters) => QUARTERS.every((quarter) => {
@@ -223,7 +261,7 @@ function saveState(snapshot) {
     updatedAt: new Date().toISOString(),
     announcement: snapshot.announcement,
     quarters: snapshot.quarters,
-    rows: snapshot.rows
+    rows: snapshot.rows.map((row) => ({ ...row, eta: normalizeEta(row.eta) }))
   }, null, 2) + '\n');
 }
 
@@ -248,8 +286,12 @@ function diffRows(previousRows, currentRows) {
       continue;
     }
     const changedFields = fields
-      .filter((field) => clean(before[field.key]) !== clean(row[field.key]))
-      .map((field) => ({ ...field, before: before[field.key], after: row[field.key] }));
+      .filter((field) => comparableFieldValue(field.key, before[field.key]) !== comparableFieldValue(field.key, row[field.key]))
+      .map((field) => ({
+        ...field,
+        before: field.key === 'eta' ? normalizeEta(before[field.key]) : before[field.key],
+        after: field.key === 'eta' ? normalizeEta(row[field.key]) : row[field.key]
+      }));
     if (changedFields.length) changes.push({ kind: 'changed', row, before, fields: changedFields });
   }
   for (const [key, row] of previous) {
