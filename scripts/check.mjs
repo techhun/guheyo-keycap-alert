@@ -96,11 +96,52 @@ async function fetchListingDetail(item) {
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36'
   });
 
+  const graphqlContents = [];
+  detailPage.on('response', async (response) => {
+    try {
+      if (!response.url().includes('api.guheyo.com/graphql')) return;
+      const contentType = response.headers()['content-type'] || '';
+      if (!contentType.includes('application/json')) return;
+
+      const json = await response.json();
+      const content = json?.data?.findOffer?.content;
+      if (typeof content === 'string' && content.trim()) {
+        graphqlContents.push(content);
+      }
+    } catch {}
+  });
+
   try {
     await detailPage.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await detailPage.waitForTimeout(1200);
+    await detailPage.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+    await detailPage.waitForTimeout(700);
+
+    const graphqlDetail = graphqlContents
+      .map((text) => normalizeDetail(text))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length)[0] || '';
+
+    if (graphqlDetail) {
+      console.log(`Detail source for ${item.title}: graphql, ${Buffer.byteLength(graphqlDetail, 'utf8')} bytes`);
+      return graphqlDetail;
+    }
 
     const detail = await detailPage.evaluate(({ title, price }) => {
+      const lines = (document.body?.innerText || '')
+        .split(/\r?\n/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+      const titleIndex = lines.findIndex((x) => x === title);
+      if (titleIndex >= 0) {
+        let start = titleIndex + 1;
+        if (price && lines[start] === price) start += 1;
+        if (start < lines.length && /택배|배송|직거래|착불/.test(lines[start])) start += 1;
+        const endIndex = lines.findIndex((x, i) => i >= start && x === '공유');
+        const body = lines.slice(start, endIndex > start ? endIndex : lines.length).join('\n');
+        if (body) return { source: 'body-slice', text: body };
+      }
+
       for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
         try {
           const parsed = JSON.parse(script.textContent || 'null');
@@ -116,20 +157,6 @@ async function fetchListingDetail(item) {
       const meta = document.querySelector('meta[property="og:description"], meta[name="description"]');
       if (meta?.getAttribute('content')) {
         return { source: 'meta', text: meta.getAttribute('content') || '' };
-      }
-
-      const lines = (document.body?.innerText || '')
-        .split(/\r?\n/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-      const titleIndex = lines.findIndex((x) => x === title);
-      if (titleIndex >= 0) {
-        let start = titleIndex + 1;
-        if (price && lines[start] === price) start += 1;
-        if (start < lines.length && /택배|배송|직거래|착불/.test(lines[start])) start += 1;
-        const endIndex = lines.findIndex((x, i) => i >= start && x === '공유');
-        const body = lines.slice(start, endIndex > start ? endIndex : lines.length).join('\n');
-        return { source: 'body-slice', text: body };
       }
 
       return { source: 'none', text: '' };
@@ -189,12 +216,13 @@ async function sendDiscord(item) {
   for (let i = 0; i < detailChunks.length; i += 1) {
     const first = i === 0;
     const total = detailChunks.length;
+    const sourceLink = first ? `\n\n[🔗 판매글 보기](${item.url})` : '';
     const embed = {
       title: first
         ? `🆕 ${truncate(item.title, 250)}`
         : `↳ 본문 계속 (${i + 1}/${total})`,
       url: item.url,
-      description: `**판매글 내용**\n${detailChunks[i]}`,
+      description: `**판매글 내용**\n${detailChunks[i]}${sourceLink}`,
       footer: { text: first ? '구해요 · 키캡 판매 알림' : `구해요 · 본문 ${i + 1}/${total}` },
       timestamp: new Date().toISOString()
     };
