@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 const STATE_PATH = 'prototypist-state.json';
@@ -23,6 +24,7 @@ const truncate = (value, maxLength = 1000) => {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DETAIL_TIMEOUT_MS = 12000;
 
 function normalizeUrl(value) {
   try {
@@ -205,6 +207,79 @@ async function fetchRows() {
   }
 }
 
+async function extractDetailNote(context, row) {
+  if (!row.itemUrl) return '';
+
+  const page = await context.newPage();
+  page.setDefaultTimeout(DETAIL_TIMEOUT_MS);
+
+  try {
+    await page.goto(row.itemUrl, { waitUntil: 'domcontentloaded', timeout: DETAIL_TIMEOUT_MS });
+    if (/just a moment/i.test(await page.title())) throw new Error('blocked by the Notion challenge page');
+    await page.waitForTimeout(800);
+
+    return await page.evaluate(({ product, statuses }) => {
+      const cleanText = (value) => String(value ?? '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').trim();
+      const root = document.querySelector('.notion-page-content') || document.querySelector('main') || document.body;
+      const ignored = new Set([
+        cleanText(product),
+        ...statuses,
+        'Expected Shipping',
+        'Estimated Shipping',
+        'Status',
+        'Updates',
+        'Update'
+      ].map((value) => value.toLowerCase()));
+
+      const lines = cleanText(root?.innerText)
+        .split('\n')
+        .map(cleanText)
+        .filter(Boolean)
+        .filter((line) => !ignored.has(line.toLowerCase()))
+        .filter((line) => !/^https?:\/\//i.test(line))
+        .filter((line) => !/^(early |late )?q[1-4](\s*-\s*q[1-4])?(\s+\d{4})?$/i.test(line))
+        .filter((line) => !/^all batches tbc$/i.test(line));
+
+      const unique = [...new Set(lines)];
+      return unique.filter((line) => line.length >= 12).slice(0, 12).join('\n');
+    }, { product: row.product, statuses: STATUSES });
+  } finally {
+    await page.close();
+  }
+}
+
+async function addDetailNotes(changes) {
+  if (changes.length === 0) return;
+
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  } catch (error) {
+    console.warn(`Proto[Typist] detail lookups skipped: ${error?.message || error}`);
+    return;
+  }
+
+  const context = await browser.newContext({
+    viewport: { width: 1400, height: 1000 },
+    locale: 'en-GB',
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+  });
+
+  try {
+    for (const change of changes) {
+      try {
+        const detailNote = clean(await extractDetailNote(context, change.row));
+        if (detailNote) change.detailNote = detailNote;
+      } catch (error) {
+        console.warn(`Proto[Typist] detail lookup skipped for ${change.row.product}: ${error?.message || error}`);
+      }
+    }
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
 function loadState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
@@ -276,7 +351,7 @@ function diffRows(previousRows, currentRows) {
   return changes;
 }
 
-async function postDiscord(embed) {
+export async function postDiscord(embed) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const response = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
@@ -304,53 +379,83 @@ async function postDiscord(embed) {
   }
 }
 
-function baseEmbed(row, title) {
+function formatKst(isoString) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(isoString));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
+function auxiliaryFields(row, detailNote, detectedAt) {
+  const fields = [
+    { name: '변경 감지 시각', value: `${formatKst(detectedAt)} KST`, inline: false },
+    { name: '링크', value: `[🔗 상세 보기](${row.itemUrl || row.sourceUrl})`, inline: false }
+  ];
+  if (detailNote) fields.push({ name: '업데이트 내용', value: truncate(detailNote), inline: false });
+  return fields;
+}
+
+function baseEmbed(row, title, detectedAt) {
   return {
     title: truncate(title, 250),
     url: row.itemUrl || row.sourceUrl,
     footer: { text: `Proto[Typist] · ${row.sourceLabel} Updates` },
-    timestamp: new Date().toISOString()
+    timestamp: detectedAt
   };
 }
 
-function addedEmbed(row) {
+export function addedEmbed(row, detailNote = '', detectedAt = new Date().toISOString()) {
   return {
-    ...baseEmbed(row, `🆕 ${row.sourceEmoji} ${row.sourceLabel} 추가 · ${row.product}`),
+    ...baseEmbed(row, `🆕 ${row.sourceEmoji} ${row.sourceLabel} 추가 · ${row.product}`, detectedAt),
     fields: [
       { name: '상태', value: truncate(row.status), inline: true },
-      { name: '예상 고객 배송', value: truncate(row.expectedShipping || '—'), inline: true }
+      { name: '예상 고객 배송', value: truncate(row.expectedShipping || '—'), inline: true },
+      ...auxiliaryFields(row, detailNote, detectedAt)
     ]
   };
 }
 
-function changedEmbed(change) {
+export function changedEmbed(change, detectedAt = new Date().toISOString()) {
   return {
-    ...baseEmbed(change.row, `🔄 ${change.row.sourceEmoji} ${change.row.sourceLabel} 업데이트 · ${change.row.product}`),
-    fields: change.fields.map((field) => ({
-      name: field.label,
-      value: truncate(`이전: ${field.before}\n현재: ${field.after}`),
-      inline: false
-    }))
+    ...baseEmbed(change.row, `🔄 ${change.row.sourceEmoji} ${change.row.sourceLabel} 업데이트 · ${change.row.product}`, detectedAt),
+    fields: [
+      ...change.fields.map((field) => ({
+        name: field.label,
+        value: truncate(`이전: ${field.before}\n현재: ${field.after}`),
+        inline: false
+      })),
+      ...auxiliaryFields(change.row, change.detailNote, detectedAt)
+    ]
   };
 }
 
-function removedEmbed(row) {
+export function removedEmbed(row, detailNote = '', detectedAt = new Date().toISOString()) {
   return {
-    ...baseEmbed(row, `➖ ${row.sourceEmoji} ${row.sourceLabel} 목록에서 제거 · ${row.product}`),
+    ...baseEmbed(row, `➖ ${row.sourceEmoji} ${row.sourceLabel} 목록에서 제거 · ${row.product}`, detectedAt),
     description: 'Proto[Typist]의 현재 업데이트 보드에서 사라졌습니다.',
     fields: [
       { name: '마지막 상태', value: truncate(row.status), inline: true },
-      { name: '예상 고객 배송', value: truncate(row.expectedShipping || '—'), inline: true }
+      { name: '예상 고객 배송', value: truncate(row.expectedShipping || '—'), inline: true },
+      ...auxiliaryFields(row, detailNote, detectedAt)
     ]
   };
 }
 
 async function notify(change) {
-  if (change.kind === 'added') return postDiscord(addedEmbed(change.row));
+  if (change.kind === 'added') return postDiscord(addedEmbed(change.row, change.detailNote));
   if (change.kind === 'changed') return postDiscord(changedEmbed(change));
-  return postDiscord(removedEmbed(change.row));
+  return postDiscord(removedEmbed(change.row, change.detailNote));
 }
 
+async function main() {
 const rows = await fetchRows();
 console.log(`Proto[Typist] total rows: ${rows.length}`);
 console.log('Proto[Typist] counts:', JSON.stringify(sourceCounts(rows)));
@@ -395,6 +500,12 @@ if (!DISCORD_WEBHOOK_URL) {
   process.exit(0);
 }
 
+await addDetailNotes(changes);
 for (const change of changes) await notify(change);
 saveState(rows);
 console.log(`Sent ${changes.length} Proto[Typist] notification(s) and updated state.`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
