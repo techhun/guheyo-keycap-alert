@@ -23,10 +23,8 @@
 
 - Guheyo
 - DCInside `⚡떴냐`
-- 권장 주기: **1분**
+- 실행 주기: **1분**
 - concurrency: `keyboard-alerts-fast`
-
-현재 기존 cron-job.org 설정과의 호환을 위해 `.github/workflows/keycap-alert.yml`도 동일한 fast 감시만 수행합니다. cron 대상을 `keyboard-alert-fast.yml`로 옮긴 뒤에는 이 호환 workflow를 삭제할 수 있습니다.
 
 ### Slow
 
@@ -36,7 +34,7 @@
 - GEONWORKS Release
 - ProtoTypist
 - SWAGKEYS
-- 권장 주기: **10분**
+- 실행 주기: **10분**
 - concurrency: `keyboard-alerts-slow`
 
 변경 빈도가 낮고 Notion 등 외부 페이지의 응답이 느릴 수 있는 감시원을 fast workflow와 분리해, 느린 소스가 Guheyo/DCInside 알림을 지연시키지 않도록 구성합니다.
@@ -103,9 +101,9 @@ GitHub의 **Actions** 탭에서 다음 workflow를 직접 실행할 수 있습�
 
 테스트용 알림이 필요한 경우 production state를 변경하지 않는 별도 one-shot workflow를 사용하고, 테스트 후 제거하는 방식을 권장합니다.
 
-## cron-job.org 권장 설정
+## cron-job.org 설정
 
 - Fast: `keyboard-alert-fast.yml` → 1분 간격
 - Slow: `keyboard-alert-slow.yml` → 10분 간격
 
-기존 fast cron이 `keycap-alert.yml`을 호출하고 있다면 현재도 정상 동작합니다. 정식 fast workflow로 endpoint를 옮긴 것을 확인한 뒤 legacy workflow를 제거합니다.
+두 cron job 모두 `POST`로 GitHub `workflow_dispatch` endpoint를 호출하고 request body는 `{"ref":"main"}`을 사용합니다.
