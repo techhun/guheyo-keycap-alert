@@ -1,0 +1,49 @@
+name: Test DCInside Discord
+
+on:
+  push:
+    paths:
+      - '.github/workflows/test-dcinside-discord.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send DCInside Discord test alert
+        env:
+          DCINSIDE_DISCORD_WEBHOOK_URL: ${{ secrets.DCINSIDE_DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$DCINSIDE_DISCORD_WEBHOOK_URL" ]; then
+            echo 'DCINSIDE_DISCORD_WEBHOOK_URL is missing.'
+            exit 1
+          fi
+
+          node <<'NODE'
+          const webhook = process.env.DCINSIDE_DISCORD_WEBHOOK_URL;
+          const payload = {
+            username: '기키갤 떴냐 알림',
+            allowed_mentions: { parse: [] },
+            embeds: [{
+              title: '[TEST] ⚡ 기키갤 떴냐 알림',
+              description: '기키갤 떴냐 전용 Discord Webhook 연결 테스트입니다. 실제 게시글 감지 상태는 변경하지 않습니다.',
+              fields: [
+                { name: '감시 대상', value: '기계식키보드 갤러리 · ⚡떴냐', inline: false },
+                { name: '상태', value: 'Webhook 연결 정상', inline: false }
+              ],
+              footer: { text: '테스트 알림 · 실제 데이터 변경 아님' },
+              timestamp: new Date().toISOString()
+            }]
+          };
+
+          const response = await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw new Error(`Discord webhook failed: ${response.status} ${await response.text()}`);
+          }
+          console.log('DCInside Discord test notification sent successfully.');
+          NODE
