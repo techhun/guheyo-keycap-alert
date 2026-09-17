@@ -33,6 +33,21 @@ final class InventoryScript {
                 return null;
               }
 
+              function looksLikeProductPayload(data) {
+                if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+                const product = data.originProduct && typeof data.originProduct === 'object' ? data.originProduct : data;
+                const id = String(product?.id ?? data?.id ?? '');
+                if (id && id === productNo) return true;
+                return !!(
+                  product?.detailAttribute?.optionInfo
+                  || data?.detailAttribute?.optionInfo
+                  || data?.optionInfo
+                  || Array.isArray(data?.optionCombinations)
+                  || product?.stockQuantity !== undefined
+                  || data?.stockQuantity !== undefined
+                );
+              }
+
               let channelUid = null;
               let observedApiUrl = null;
               const roots = [window.__PRELOADED_STATE__, window.__INITIAL_STATE__, window.__NEXT_DATA__].filter(Boolean);
@@ -43,10 +58,17 @@ final class InventoryScript {
 
               const resources = performance.getEntriesByType('resource').map((entry) => entry.name || '');
               for (const resourceUrl of resources) {
-                const match = resourceUrl.match(/\\/i\\/v2\\/channels\\/([^/]+)\\/products\\/(\\d+)/);
-                if (!match) continue;
-                if (!channelUid) channelUid = decodeURIComponent(match[1]);
-                if (match[2] === productNo) observedApiUrl = resourceUrl;
+                try {
+                  const parsed = new URL(resourceUrl, location.href);
+                  const anyProductMatch = parsed.pathname.match(/^\\/i\\/v2\\/channels\\/([^/]+)\\/products\\/(\\d+)(?:\\/.*)?$/);
+                  if (!anyProductMatch) continue;
+                  if (!channelUid) channelUid = decodeURIComponent(anyProductMatch[1]);
+
+                  const exactProductMatch = parsed.pathname.match(/^\\/i\\/v2\\/channels\\/([^/]+)\\/products\\/(\\d+)\\/?$/);
+                  if (exactProductMatch && exactProductMatch[2] === productNo) {
+                    observedApiUrl = parsed.toString();
+                  }
+                } catch (ignored) {}
               }
 
               if (!channelUid) {
@@ -54,15 +76,19 @@ final class InventoryScript {
                 return;
               }
 
+              const encodedUid = encodeURIComponent(channelUid);
               const candidates = [];
               if (observedApiUrl) candidates.push(observedApiUrl);
-              candidates.push(`/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
-              candidates.push(`https://smartstore.naver.com/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
+              candidates.push(`${location.origin}/i/v2/channels/${encodedUid}/products/${productNo}?withWindow=false`);
+              candidates.push(`https://smartstore.naver.com/i/v2/channels/${encodedUid}/products/${productNo}?withWindow=false`);
+              candidates.push(`https://m.smartstore.naver.com/i/v2/channels/${encodedUid}/products/${productNo}?withWindow=false`);
 
               let response = null;
               let text = '';
+              let data = null;
               let usedApiUrl = null;
               const attempts = [];
+
               for (const apiUrl of [...new Set(candidates)]) {
                 try {
                   const current = await fetch(apiUrl, {
@@ -70,13 +96,24 @@ final class InventoryScript {
                     headers: { accept: 'application/json, text/plain, */*' }
                   });
                   const currentText = await current.text();
-                  attempts.push({ url: apiUrl, status: current.status });
+                  let currentData = null;
+                  let validPayload = false;
                   if (current.ok) {
+                    try {
+                      currentData = JSON.parse(currentText);
+                      validPayload = looksLikeProductPayload(currentData);
+                    } catch (ignored) {}
+                  }
+                  attempts.push({ url: apiUrl, status: current.status, validPayload });
+
+                  if (current.ok && validPayload) {
                     response = current;
                     text = currentText;
+                    data = currentData;
                     usedApiUrl = apiUrl;
                     break;
                   }
+
                   if (!response) {
                     response = current;
                     text = currentText;
@@ -87,24 +124,16 @@ final class InventoryScript {
                 }
               }
 
-              if (!response || !response.ok) {
+              if (!data) {
                 send({
                   ok: false,
-                  error: 'PRODUCT_API_FAILED',
+                  error: response?.ok ? 'PRODUCT_DATA_NOT_FOUND' : 'PRODUCT_API_FAILED',
                   status: response ? response.status : null,
                   pageUrl: location.href,
                   apiUrl: usedApiUrl,
                   attempts,
                   preview: text.replace(/\\s+/g, ' ').slice(0, 300)
                 });
-                return;
-              }
-
-              let data;
-              try {
-                data = JSON.parse(text);
-              } catch (error) {
-                send({ ok: false, error: 'INVALID_PRODUCT_JSON', status: response.status, apiUrl: usedApiUrl, preview: text.slice(0, 300) });
                 return;
               }
 
