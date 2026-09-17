@@ -163,7 +163,7 @@ public class SettingsActivity extends Activity {
         LinearLayout batteryHeader = new LinearLayout(this);
         batteryHeader.setGravity(Gravity.CENTER_VERTICAL);
         batteryCard.addView(batteryHeader, matchWrap());
-        batteryHeader.addView(text("배터리 최적화", 15, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(
+        batteryHeader.addView(text("백그라운드 실행", 15, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(
             0,
             LinearLayout.LayoutParams.WRAP_CONTENT,
             1f
@@ -315,10 +315,10 @@ public class SettingsActivity extends Activity {
 
     private void refreshBatteryStatus() {
         if (batteryStatus == null) return;
-        boolean ignored = BatteryAccess.isOptimizationIgnored(this);
-        batteryStatus.setText(ignored ? "예외 적용됨" : "최적화 대상");
-        batteryStatus.setTextColor(ignored ? GREEN : SUB);
-        batteryStatus.setBackground(roundRect(ignored ? GREEN_SOFT : FIELD, 12));
+        boolean restricted = BatteryAccess.isBackgroundRestricted(this);
+        batteryStatus.setText(restricted ? "제한됨" : "허용됨");
+        batteryStatus.setTextColor(restricted ? SUB : GREEN);
+        batteryStatus.setBackground(roundRect(restricted ? FIELD : GREEN_SOFT, 12));
     }
 
     private String versionName() {
