@@ -393,7 +393,7 @@ public class MonitorService extends Service {
     }
 
     private PendingIntent openAppIntent() {
-        Intent intent = new Intent(this, MainActivity.class);
+        Intent intent = new Intent(this, GateActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(
             this,
@@ -406,7 +406,7 @@ public class MonitorService extends Service {
     private Notification buildOngoingNotification(String text) {
         return new Notification.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
-            .setContentTitle("Keyboard Restock")
+            .setContentTitle("Restock")
             .setContentText(text)
             .setContentIntent(openAppIntent())
             .setOngoing(true)
@@ -429,7 +429,7 @@ public class MonitorService extends Service {
         }
 
         Intent open = productUrl == null || productUrl.isBlank()
-            ? new Intent(this, MainActivity.class)
+            ? new Intent(this, GateActivity.class)
             : new Intent(Intent.ACTION_VIEW, Uri.parse(productUrl));
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent contentIntent = PendingIntent.getActivity(
