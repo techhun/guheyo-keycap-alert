@@ -1,15 +1,15 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-17T03:14:49.899Z",
+  "updatedAt": "2026-09-17T03:15:28.800Z",
   "sources": {
     "guheyo": {
       "status": "ok",
       "changedAt": "2026-09-16T12:50:00.000Z"
     },
     "dcinside": {
-      "status": "fail",
-      "changedAt": "2026-09-17T03:14:49.899Z"
+      "status": "ok",
+      "changedAt": "2026-09-17T03:15:28.800Z"
     },
     "restock": {
       "status": "ok",
