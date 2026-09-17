@@ -84,6 +84,7 @@ public class SettingsActivity extends Activity {
         back.setGravity(Gravity.CENTER);
         back.setPadding(0, 0, dp(14), 0);
         back.setOnClickListener(v -> finish());
+        Motion.press(back);
         header.addView(back, new LinearLayout.LayoutParams(dp(40), dp(46)));
         header.addView(text("설정", 24, TEXT, Typeface.BOLD));
 
@@ -101,10 +102,12 @@ public class SettingsActivity extends Activity {
             final int value = VALUES[i];
             TextView chip = text(LABELS[i], 14, SUB, Typeface.BOLD);
             chip.setGravity(Gravity.CENTER);
+            Motion.press(chip);
             chip.setOnClickListener(v -> {
                 interval = value;
                 MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, value).apply();
                 refreshChips();
+                Motion.selection(chip);
             });
             chips[i] = chip;
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1f);
@@ -216,11 +219,11 @@ public class SettingsActivity extends Activity {
 
         TextView export = actionButton("내보내기", BLUE, BLUE_SOFT);
         export.setOnClickListener(v -> exportBackup());
-        backupRow.addView(export, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        backupRow.addView(export, new LinearLayout.LayoutParams(0, dp(52), 1f));
 
         TextView restore = actionButton("가져오기", TEXT, FIELD);
         restore.setOnClickListener(v -> importBackup());
-        LinearLayout.LayoutParams restoreLp = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        LinearLayout.LayoutParams restoreLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
         restoreLp.leftMargin = dp(8);
         backupRow.addView(restore, restoreLp);
 
@@ -233,6 +236,13 @@ public class SettingsActivity extends Activity {
         root.requestApplyInsets();
         refreshNotificationStatus();
         refreshBatteryStatus();
+
+        Motion.enter(header, 0L);
+        Motion.enter(intervalCard, 35L);
+        Motion.enter(notificationCard, 70L);
+        Motion.enter(batteryCard, 105L);
+        Motion.enter(backupCard, 140L);
+        Motion.enter(version, 170L);
     }
 
     private void exportBackup() {
@@ -309,17 +319,23 @@ public class SettingsActivity extends Activity {
     private void refreshNotificationStatus() {
         if (notificationStatus == null) return;
         boolean allowed = NotificationAccess.isAllowed(this);
-        notificationStatus.setText(allowed ? "허용됨" : "꺼짐");
+        String next = allowed ? "허용됨" : "꺼짐";
+        boolean changed = !next.contentEquals(notificationStatus.getText());
+        notificationStatus.setText(next);
         notificationStatus.setTextColor(allowed ? GREEN : SUB);
         notificationStatus.setBackground(roundRect(allowed ? GREEN_SOFT : FIELD, 12));
+        if (changed) Motion.valueChange(notificationStatus);
     }
 
     private void refreshBatteryStatus() {
         if (batteryStatus == null) return;
         boolean restricted = BatteryAccess.isBackgroundRestricted(this);
-        batteryStatus.setText(restricted ? "제한됨" : "허용됨");
+        String next = restricted ? "제한됨" : "허용됨";
+        boolean changed = !next.contentEquals(batteryStatus.getText());
+        batteryStatus.setText(next);
         batteryStatus.setTextColor(restricted ? SUB : GREEN);
         batteryStatus.setBackground(roundRect(restricted ? FIELD : GREEN_SOFT, 12));
+        if (changed) Motion.valueChange(batteryStatus);
     }
 
     private String versionName() {
@@ -341,9 +357,12 @@ public class SettingsActivity extends Activity {
     }
 
     private TextView actionButton(String label, int color, int background) {
-        TextView view = text(label, 14, color, Typeface.BOLD);
+        TextView view = text(label, 15, color, Typeface.BOLD);
         view.setGravity(Gravity.CENTER);
-        view.setBackground(roundRect(background, 12));
+        view.setMinHeight(dp(54));
+        view.setPadding(dp(16), dp(13), dp(16), dp(13));
+        view.setBackground(roundRect(background, 14));
+        Motion.press(view);
         return view;
     }
 
@@ -391,5 +410,11 @@ public class SettingsActivity extends Activity {
         super.onResume();
         refreshNotificationStatus();
         refreshBatteryStatus();
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
+        Motion.pop(this);
     }
 }
