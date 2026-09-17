@@ -11,18 +11,23 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public class LoginActivity extends Activity {
     static final String EXTRA_TARGET_URL = "target_url";
+    private static final String NAVER_APP_PACKAGE = "com.nhn.android.search";
 
     private WebView webView;
     private String targetUrl;
     private boolean completing;
+    private boolean externalLoginLaunched;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,6 +81,7 @@ public class LoginActivity extends Activity {
 
         webView = new WebView(this);
         MainActivity.configureWebView(webView);
+        webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -126,6 +132,7 @@ public class LoginActivity extends Activity {
         } catch (Exception ignored) {
             return false;
         }
+
         String scheme = uri.getScheme();
         if (scheme == null
             || "http".equalsIgnoreCase(scheme)
@@ -133,30 +140,73 @@ public class LoginActivity extends Activity {
             return false;
         }
 
-        try {
-            if ("intent".equalsIgnoreCase(scheme)) {
-                Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                try {
-                    startActivity(intent);
-                } catch (ActivityNotFoundException missing) {
-                    String fallback = intent.getStringExtra("browser_fallback_url");
-                    if (fallback != null && !fallback.isBlank()) view.loadUrl(fallback);
-                }
-                return true;
-            }
+        if ("nidlogin".equalsIgnoreCase(scheme)) {
+            launchNaverApp(new Intent(Intent.ACTION_VIEW, uri));
+            return true;
+        }
 
-            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-            if (intent.resolveActivity(getPackageManager()) != null) {
-                startActivity(intent);
-                return true;
-            }
-        } catch (Exception ignored) {}
+        if ("intent".equalsIgnoreCase(scheme)) {
+            try {
+                Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                String packageName = intent.getPackage();
+                if (packageName == null || packageName.isBlank() || NAVER_APP_PACKAGE.equals(packageName)) {
+                    intent.setPackage(NAVER_APP_PACKAGE);
+                    if (launchNaverApp(intent)) return true;
+                }
+                String fallback = intent.getStringExtra("browser_fallback_url");
+                if (isSafeWebFallback(fallback)) view.loadUrl(fallback);
+            } catch (Exception ignored) {}
+            return true;
+        }
+
+        // Login WebView should never hand arbitrary custom schemes to other apps.
         return true;
+    }
+
+    private boolean launchNaverApp(Intent intent) {
+        try {
+            intent.setPackage(NAVER_APP_PACKAGE);
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                showNaverAppFallback();
+                return false;
+            }
+            externalLoginLaunched = true;
+            startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException missing) {
+            showNaverAppFallback();
+            return false;
+        } catch (Exception ignored) {
+            showNaverAppFallback();
+            return false;
+        }
+    }
+
+    private void showNaverAppFallback() {
+        Toast.makeText(
+            this,
+            "네이버 앱을 찾을 수 없어요. 아래에서 직접 로그인해주세요.",
+            Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private boolean isSafeWebFallback(String value) {
+        if (value == null || value.isBlank()) return false;
+        try {
+            Uri uri = Uri.parse(value);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (!"https".equalsIgnoreCase(scheme) || host == null) return false;
+            return host.equals("naver.com") || host.endsWith(".naver.com");
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private void completeLogin() {
         if (completing || !SessionState.hasNaverSession()) return;
         completing = true;
+        CookieManager.getInstance().flush();
         Intent result = new Intent();
         result.putExtra(EXTRA_TARGET_URL, targetUrl);
         setResult(RESULT_OK, result);
@@ -197,6 +247,25 @@ public class LoginActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.resumeTimers();
+            if (externalLoginLaunched) {
+                externalLoginLaunched = false;
+                webView.requestFocus();
+            }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (webView != null) webView.onPause();
+        super.onPause();
     }
 
     @Override
