@@ -15,6 +15,7 @@
     "restock:bot": "node scripts/restock-bot.mjs",
     "restock:register": "node scripts/register-restock-commands.mjs",
     "restock:probe": "node scripts/restock-local-probe.mjs",
+    "restock:profile:setup": "node scripts/restock-profile-setup.mjs",
     "restock:probe:profile": "node scripts/restock-profile-probe.mjs"
   },
   "dependencies": {
