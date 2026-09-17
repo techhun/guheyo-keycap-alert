@@ -1,6 +1,7 @@
 package com.techhun.keyboardalert.restock;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -18,7 +19,6 @@ import android.widget.TextView;
 
 public class LoginActivity extends Activity {
     static final String EXTRA_TARGET_URL = "target_url";
-    private static final String SMARTSTORE_HOME = "https://m.smartstore.naver.com/";
 
     private WebView webView;
     private String targetUrl;
@@ -28,7 +28,7 @@ public class LoginActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         targetUrl = getIntent().getStringExtra(EXTRA_TARGET_URL);
-        if (targetUrl == null || targetUrl.isBlank()) targetUrl = SMARTSTORE_HOME;
+        if (targetUrl == null || targetUrl.isBlank()) targetUrl = SessionState.SMARTSTORE_HOME;
 
         Window window = getWindow();
         window.setStatusBarColor(Color.WHITE);
@@ -79,12 +79,12 @@ public class LoginActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (loginCompleted(url)) {
-                    completeLogin();
-                    return true;
-                }
-                return false;
+                return handleNavigation(view, request.getUrl().toString());
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handleNavigation(view, url);
             }
 
             @Override
@@ -93,6 +93,11 @@ public class LoginActivity extends Activity {
                     view.stopLoading();
                     completeLogin();
                 }
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (loginCompleted(url)) completeLogin();
             }
         });
         root.addView(webView, new LinearLayout.LayoutParams(
@@ -108,8 +113,49 @@ public class LoginActivity extends Activity {
         webView.loadUrl(loginUrl);
     }
 
+    private boolean handleNavigation(WebView view, String url) {
+        if (url == null || url.isBlank()) return false;
+        if (loginCompleted(url)) {
+            completeLogin();
+            return true;
+        }
+
+        Uri uri;
+        try {
+            uri = Uri.parse(url);
+        } catch (Exception ignored) {
+            return false;
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null
+            || "http".equalsIgnoreCase(scheme)
+            || "https".equalsIgnoreCase(scheme)) {
+            return false;
+        }
+
+        try {
+            if ("intent".equalsIgnoreCase(scheme)) {
+                Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                try {
+                    startActivity(intent);
+                } catch (ActivityNotFoundException missing) {
+                    String fallback = intent.getStringExtra("browser_fallback_url");
+                    if (fallback != null && !fallback.isBlank()) view.loadUrl(fallback);
+                }
+                return true;
+            }
+
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            if (intent.resolveActivity(getPackageManager()) != null) {
+                startActivity(intent);
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return true;
+    }
+
     private void completeLogin() {
-        if (completing) return;
+        if (completing || !SessionState.hasNaverSession()) return;
         completing = true;
         Intent result = new Intent();
         result.putExtra(EXTRA_TARGET_URL, targetUrl);
@@ -118,13 +164,35 @@ public class LoginActivity extends Activity {
     }
 
     private boolean loginCompleted(String url) {
-        if (url == null || !url.contains("smartstore.naver.com")) return false;
-        if (targetUrl.contains("/products/")) return isProductUrl(url);
-        return true;
+        if (url == null || url.isBlank()) return false;
+        try {
+            Uri uri = Uri.parse(url);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return false;
+            String host = uri.getHost();
+            if (host == null) return false;
+            boolean smartStoreHost = host.equals("smartstore.naver.com") || host.endsWith(".smartstore.naver.com");
+            if (!smartStoreHost || !SessionState.hasNaverSession()) return false;
+            if (isProductTarget()) return isProductUrl(uri);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
-    private boolean isProductUrl(String url) {
-        return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+    private boolean isProductTarget() {
+        try {
+            Uri uri = Uri.parse(targetUrl);
+            String path = uri.getPath();
+            return path != null && path.contains("/products/");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean isProductUrl(Uri uri) {
+        String path = uri.getPath();
+        return path != null && path.contains("/products/");
     }
 
     private int dp(int value) {
