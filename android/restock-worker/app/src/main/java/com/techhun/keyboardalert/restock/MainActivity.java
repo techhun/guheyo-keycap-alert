@@ -66,6 +66,9 @@ public class MainActivity extends Activity {
     private static final int GREEN = Color.rgb(20, 180, 110);
     private static final int GREEN_SOFT = Color.rgb(232, 249, 241);
 
+    private boolean firstResume = true;
+    private boolean refreshProductsOnResume;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable statusRefresh = new Runnable() {
         @Override public void run() {
@@ -100,8 +103,6 @@ public class MainActivity extends Activity {
     private boolean autoInspect;
     private boolean loginLaunching;
     private boolean optionLoadInProgress;
-    private boolean firstResume = true;
-    private boolean refreshProductsOnResume;
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
