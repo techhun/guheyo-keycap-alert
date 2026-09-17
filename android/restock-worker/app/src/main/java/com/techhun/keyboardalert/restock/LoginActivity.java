@@ -4,8 +4,12 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
@@ -25,16 +29,37 @@ public class LoginActivity extends Activity {
             targetUrl = "https://m.smartstore.naver.com/";
         }
 
+        Window window = getWindow();
+        window.setStatusBarColor(Color.WHITE);
+        window.setNavigationBarColor(Color.WHITE);
+        window.getDecorView().setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        );
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                var bars = insets.getInsets(WindowInsets.Type.systemBars());
+                top = bars.top;
+                bottom = bars.bottom;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(0, top, 0, bottom);
+            return insets;
+        });
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(12), dp(16), dp(10));
+        header.setPadding(dp(16), dp(6), dp(16), dp(6));
         root.addView(header, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
+            dp(54)
         ));
 
         TextView close = new TextView(this);
@@ -42,16 +67,25 @@ public class LoginActivity extends Activity {
         close.setTextSize(15f);
         close.setTextColor(Color.rgb(49, 130, 246));
         close.setTypeface(null, Typeface.BOLD);
-        close.setPadding(0, dp(10), dp(20), dp(10));
+        close.setGravity(Gravity.CENTER_VERTICAL);
+        close.setPadding(0, 0, dp(20), 0);
         close.setOnClickListener(v -> finish());
-        header.addView(close);
+        header.addView(close, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT
+        ));
 
         TextView title = new TextView(this);
         title.setText("네이버 로그인");
-        title.setTextSize(20f);
+        title.setTextSize(19f);
         title.setTextColor(Color.rgb(25, 31, 40));
         title.setTypeface(null, Typeface.BOLD);
-        header.addView(title);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(title, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            1f
+        ));
 
         webView = new WebView(this);
         MainActivity.configureWebView(webView);
@@ -73,6 +107,7 @@ public class LoginActivity extends Activity {
         ));
 
         setContentView(root);
+        root.requestApplyInsets();
         webView.loadUrl(targetUrl);
     }
 
