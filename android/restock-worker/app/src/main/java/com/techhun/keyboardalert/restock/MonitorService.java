@@ -7,8 +7,10 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -16,6 +18,7 @@ import android.os.PowerManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
@@ -38,6 +41,8 @@ public class MonitorService extends Service {
     private static final int NOTIFICATION_MONITOR = 41001;
     private static final long RESULT_TIMEOUT_MS = 20_000L;
     private static final long MIN_PRODUCT_SPACING_MS = 1_000L;
+    private static final long INITIAL_RATE_LIMIT_BACKOFF_MS = 30_000L;
+    private static final long MAX_RATE_LIMIT_BACKOFF_MS = 5 * 60_000L;
 
     private enum Mode { BOOTSTRAP, DIRECT, DISCOVERY }
 
@@ -51,6 +56,8 @@ public class MonitorService extends Service {
     private boolean bootstrapReady;
     private Mode mode = Mode.BOOTSTRAP;
     private JSONObject currentProduct;
+    private long rateLimitBackoffMs;
+    private long backoffUntil;
 
     private final Runnable resultTimeout = () -> {
         if (!awaitingResult || stopping) return;
@@ -79,15 +86,28 @@ public class MonitorService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (!NotificationAccess.isAllowed(this)) {
+            MonitorPrefs.updateStatus(this, "알림 권한 필요");
+            MonitorPrefs.setRunning(this, false);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
 
         MonitorPrefs.setRunning(this, true);
         acquireWakeLock();
-        startForeground(NOTIFICATION_MONITOR, buildOngoingNotification(products.length() + "개 알림 켜짐"));
+        Notification ongoing = buildOngoingNotification(products.length() + "개 알림 켜짐");
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(
+                NOTIFICATION_MONITOR,
+                ongoing,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST
+            );
+        } else {
+            startForeground(NOTIFICATION_MONITOR, ongoing);
+        }
         ensureWebView();
 
-        if (!bootstrapReady) {
-            bootstrapSession();
-        }
+        if (!bootstrapReady) bootstrapSession();
         return START_STICKY;
     }
 
@@ -121,9 +141,7 @@ public class MonitorService extends Service {
             public void onPageFinished(WebView view, String url) {
                 if (stopping) return;
                 if (isLoginUrl(url)) {
-                    setStatus("로그인 필요");
-                    updateOngoingNotification("앱에서 다시 로그인해주세요");
-                    stopSelf();
+                    invalidateSessionAndStop();
                     return;
                 }
                 if (!isProductUrl(url)) return;
@@ -155,6 +173,11 @@ public class MonitorService extends Service {
         if (stopping || !bootstrapReady || awaitingResult) return;
         products = ProductStore.enabledList(this);
         if (products.length() == 0) {
+            stopSelf();
+            return;
+        }
+        if (!NotificationAccess.isAllowed(this)) {
+            setStatus("알림 권한 필요");
             stopSelf();
             return;
         }
@@ -220,9 +243,13 @@ public class MonitorService extends Service {
                 String error = result.optString("error", "UNKNOWN");
                 int status = result.optInt("status", 0);
                 if (status == 401 || status == 403) {
-                    setStatus("로그인 필요");
-                    updateOngoingNotification("앱에서 다시 로그인해주세요");
-                    stopSelf();
+                    invalidateSessionAndStop();
+                    return;
+                }
+
+                if (status == 429) {
+                    applyRateLimitBackoff();
+                    scheduleNextProduct();
                     return;
                 }
 
@@ -245,6 +272,7 @@ public class MonitorService extends Service {
                 return;
             }
 
+            clearRateLimitBackoff();
             if (mode == Mode.DISCOVERY) {
                 currentProduct.put("apiUrl", result.optString("apiUrl", ""));
                 currentProduct.put("channelUid", result.optString("channelUid", ""));
@@ -316,6 +344,31 @@ public class MonitorService extends Service {
         }
     }
 
+    private void applyRateLimitBackoff() {
+        rateLimitBackoffMs = rateLimitBackoffMs <= 0
+            ? INITIAL_RATE_LIMIT_BACKOFF_MS
+            : Math.min(MAX_RATE_LIMIT_BACKOFF_MS, rateLimitBackoffMs * 2L);
+        backoffUntil = System.currentTimeMillis() + rateLimitBackoffMs;
+        long seconds = Math.max(1L, rateLimitBackoffMs / 1000L);
+        markCurrentFailure("요청 제한 · " + seconds + "초 후 재시도");
+        updateOngoingNotification("요청 제한 · 잠시 후 다시 확인해요");
+    }
+
+    private void clearRateLimitBackoff() {
+        rateLimitBackoffMs = 0L;
+        backoffUntil = 0L;
+    }
+
+    private void invalidateSessionAndStop() {
+        if (stopping) return;
+        setStatus("로그인 필요");
+        updateOngoingNotification("앱에서 다시 로그인해주세요");
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.removeAllCookies(value -> cookies.flush());
+        WebStorage.getInstance().deleteAllData();
+        stopSelf();
+    }
+
     private void markCurrentFailure(String message) {
         if (currentProduct != null) {
             try {
@@ -340,7 +393,8 @@ public class MonitorService extends Service {
             MIN_PRODUCT_SPACING_MS,
             MonitorPrefs.intervalSeconds(this) * 1000L / Math.max(1, products.length())
         );
-        handler.postDelayed(this::checkCurrentProduct, spacing);
+        long backoff = Math.max(0L, backoffUntil - System.currentTimeMillis());
+        handler.postDelayed(this::checkCurrentProduct, Math.max(spacing, backoff));
     }
 
     private String optionLabel(JSONObject option) {
@@ -369,9 +423,9 @@ public class MonitorService extends Service {
     private void acquireWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) return;
         PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "keyboard-alert:restock-monitor");
+        wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "restock:monitor");
         wakeLock.setReferenceCounted(false);
-        wakeLock.acquire(4 * 60 * 60 * 1000L);
+        wakeLock.acquire();
     }
 
     private void createNotificationChannels() {
@@ -447,7 +501,7 @@ public class MonitorService extends Service {
             .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .setDefaults(Notification.DEFAULT_ALL)
-            .setCategory(Notification.CATEGORY_ALARM)
+            .setCategory(Notification.CATEGORY_EVENT)
             .build();
         getSystemService(NotificationManager.class).notify(
             42000 + Math.abs((title + text).hashCode() % 1000),
