@@ -38,8 +38,31 @@ function summarizeProduct(data) {
   };
 }
 
+async function fetchProductInPage(page, channelUid, productNo) {
+  return page.evaluate(async ({ channelUid, productNo }) => {
+    const url = `/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`;
+    const response = await fetch(url, {
+      credentials: 'include',
+      headers: {
+        accept: 'application/json, text/plain, */*',
+        'cache-control': 'no-cache',
+        pragma: 'no-cache'
+      }
+    });
+    const text = await response.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch {}
+    return {
+      status: response.status,
+      contentType: response.headers.get('content-type'),
+      json,
+      preview: json ? null : text.replace(/\s+/g, ' ').slice(0, 180)
+    };
+  }, { channelUid, productNo });
+}
+
 const target = parseTarget(input);
-const profileDir = `.restock-probe-profile`;
+const profileDir = '.restock-probe-profile';
 
 let context;
 try {
@@ -57,11 +80,14 @@ try {
 
 const page = context.pages()[0] || await context.newPage();
 const captured = [];
+let capturedChannelUid = null;
+let capturedProduct = null;
 
 page.on('response', async (response) => {
   const url = response.url();
   if (!/\/i\/v\d+\//.test(url)) return;
   if (!url.includes('smartstore.naver.com')) return;
+
   const record = {
     status: response.status(),
     url,
@@ -69,6 +95,17 @@ page.on('response', async (response) => {
   };
   captured.push(record);
   console.log('[network]', JSON.stringify(record));
+
+  const productMatch = url.match(/\/i\/v2\/channels\/([^/]+)\/products\/(\d+)/);
+  if (!productMatch || productMatch[2] !== target.productNo) return;
+
+  capturedChannelUid ||= decodeURIComponent(productMatch[1]);
+  if (response.status() !== 200 || capturedProduct) return;
+
+  try {
+    capturedProduct = await response.json();
+    console.log('[network-product] captured product JSON from the page request');
+  } catch {}
 });
 
 try {
@@ -84,9 +121,27 @@ try {
     title: await page.title()
   }));
 
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(3000);
 
   const result = await page.evaluate(async ({ store, productNo }) => {
+    function findChannelUid(root) {
+      if (!root || typeof root !== 'object') return null;
+      const stack = [root];
+      const seen = new Set();
+      let count = 0;
+      while (stack.length && count < 20000) {
+        const value = stack.pop();
+        if (!value || typeof value !== 'object' || seen.has(value)) continue;
+        seen.add(value);
+        count += 1;
+        if (typeof value.channelUid === 'string' && value.channelUid.length >= 8) return value.channelUid;
+        for (const child of Object.values(value)) {
+          if (child && typeof child === 'object') stack.push(child);
+        }
+      }
+      return null;
+    }
+
     async function getJson(url) {
       const response = await fetch(url, {
         credentials: 'include',
@@ -107,10 +162,18 @@ try {
       };
     }
 
+    const roots = [
+      window.__PRELOADED_STATE__,
+      window.__INITIAL_STATE__,
+      window.__NEXT_DATA__
+    ].filter(Boolean);
+    const stateChannelUid = roots.map(findChannelUid).find(Boolean) || null;
+
     const resolverUrl = `/i/v1/smart-stores?url=${encodeURIComponent(store)}`;
     const resolver = await getJson(resolverUrl);
     const channel = resolver.json?.channel ?? resolver.json;
-    const channelUid = channel?.channelUid || channel?.channelId || null;
+    const resolverChannelUid = channel?.channelUid || channel?.channelId || null;
+    const channelUid = resolverChannelUid || stateChannelUid;
 
     let product = null;
     if (channelUid) {
@@ -122,33 +185,57 @@ try {
       resolver: {
         status: resolver.status,
         contentType: resolver.contentType,
-        channelUid,
+        channelUid: resolverChannelUid,
         channelName: channel?.channelName ?? null,
         preview: resolver.preview
       },
+      stateChannelUid,
       product
     };
   }, target);
 
-  console.log('[resolver]', JSON.stringify(result.resolver, null, 2));
+  const effectiveChannelUid = result.resolver.channelUid || result.stateChannelUid || capturedChannelUid;
+  let productResult = result.product;
 
-  if (!result.resolver.channelUid) {
+  if ((!productResult || productResult.status !== 200 || !productResult.json) && capturedProduct) {
+    productResult = {
+      status: 200,
+      contentType: 'application/json',
+      json: capturedProduct,
+      preview: null,
+      source: 'captured-network'
+    };
+  }
+
+  if ((!productResult || productResult.status !== 200 || !productResult.json) && effectiveChannelUid) {
+    const retried = await fetchProductInPage(page, effectiveChannelUid, target.productNo);
+    if (retried.status === 200 && retried.json) productResult = retried;
+    else if (!productResult) productResult = retried;
+  }
+
+  console.log('[resolver]', JSON.stringify({
+    ...result.resolver,
+    stateChannelUid: result.stateChannelUid,
+    capturedChannelUid,
+    effectiveChannelUid
+  }, null, 2));
+
+  if (!effectiveChannelUid) {
     console.log('[result] CHANNEL_UID_NOT_FOUND');
-    console.log('[captured]', JSON.stringify(captured, null, 2));
     process.exitCode = 2;
-  } else if (!result.product) {
+  } else if (!productResult) {
     console.log('[result] PRODUCT_API_NOT_CALLED');
     process.exitCode = 3;
-  } else if (result.product.status !== 200 || !result.product.json) {
+  } else if (productResult.status !== 200 || !productResult.json) {
     console.log('[product]', JSON.stringify({
-      status: result.product.status,
-      contentType: result.product.contentType,
-      preview: result.product.preview
+      status: productResult.status,
+      contentType: productResult.contentType,
+      preview: productResult.preview
     }, null, 2));
     console.log('[result] PRODUCT_API_FAILED');
     process.exitCode = 4;
   } else {
-    console.log('[product]', JSON.stringify(summarizeProduct(result.product.json), null, 2));
+    console.log('[product]', JSON.stringify(summarizeProduct(productResult.json), null, 2));
     console.log('[result] OK');
   }
 
