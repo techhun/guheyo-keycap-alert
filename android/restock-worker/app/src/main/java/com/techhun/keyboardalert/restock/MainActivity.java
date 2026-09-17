@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -17,7 +18,6 @@ import android.widget.TextView;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
 public class MainActivity extends Activity {
     private static final String DEFAULT_URL = "https://m.smartstore.naver.com/swagkey/products/12348949592";
@@ -29,7 +29,7 @@ public class MainActivity extends Activity {
     private Button inspectButton;
 
     @Override
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
@@ -77,10 +77,6 @@ public class MainActivity extends Activity {
         settings.setLoadsImagesAutomatically(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
 
-        // Naver treats the stock Android WebView user agent differently from a normal
-        // browser in some flows. Keep the device/WebView Chromium version, but remove
-        // the explicit embedded-WebView markers so the public product page is tested
-        // under a browser-style UA before requiring any login session.
         String browserUserAgent = settings.getUserAgentString()
             .replace("; wv)", ")")
             .replace("Version/4.0 ", "");
@@ -90,6 +86,7 @@ public class MainActivity extends Activity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
+        webView.addJavascriptInterface(new InventoryBridge(), "RestockBridge");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
@@ -144,138 +141,182 @@ public class MainActivity extends Activity {
     private void inspectInventory() {
         inspectButton.setEnabled(false);
         statusText.setText("상품 API 확인 중...");
+        resultText.setText("페이지 내부에서 상품 API를 조회하고 있습니다...");
 
         String script = """
-            (async () => {
-              try {
-                const productMatch = location.pathname.match(/\\/products\\/(\\d+)/);
-                const productNo = productMatch ? productMatch[1] : null;
-                if (!productNo) {
-                  return JSON.stringify({ ok: false, error: 'PRODUCT_NO_NOT_FOUND', pageUrl: location.href, title: document.title });
-                }
-
-                function findChannelUid(root) {
-                  if (!root || typeof root !== 'object') return null;
-                  const stack = [root];
-                  const seen = new Set();
-                  let count = 0;
-                  while (stack.length && count < 20000) {
-                    const value = stack.pop();
-                    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-                    seen.add(value);
-                    count += 1;
-                    if (typeof value.channelUid === 'string' && value.channelUid.length >= 8) return value.channelUid;
-                    for (const child of Object.values(value)) {
-                      if (child && typeof child === 'object') stack.push(child);
-                    }
+            (() => {
+              const send = (value) => window.RestockBridge.onResult(JSON.stringify(value));
+              (async () => {
+                try {
+                  const productMatch = location.pathname.match(/\\/products\\/(\\d+)/);
+                  const productNo = productMatch ? productMatch[1] : null;
+                  if (!productNo) {
+                    send({ ok: false, error: 'PRODUCT_NO_NOT_FOUND', pageUrl: location.href, title: document.title });
+                    return;
                   }
-                  return null;
-                }
 
-                let channelUid = null;
-                const roots = [window.__PRELOADED_STATE__, window.__INITIAL_STATE__, window.__NEXT_DATA__].filter(Boolean);
-                for (const root of roots) {
-                  channelUid = findChannelUid(root);
-                  if (channelUid) break;
-                }
+                  function findChannelUid(root) {
+                    if (!root || typeof root !== 'object') return null;
+                    const stack = [root];
+                    const seen = new Set();
+                    let count = 0;
+                    while (stack.length && count < 30000) {
+                      const value = stack.pop();
+                      if (!value || typeof value !== 'object' || seen.has(value)) continue;
+                      seen.add(value);
+                      count += 1;
+                      if (typeof value.channelUid === 'string' && value.channelUid.length >= 8) return value.channelUid;
+                      for (const child of Object.values(value)) {
+                        if (child && typeof child === 'object') stack.push(child);
+                      }
+                    }
+                    return null;
+                  }
 
-                if (!channelUid) {
+                  let channelUid = null;
+                  let observedApiUrl = null;
+                  const roots = [window.__PRELOADED_STATE__, window.__INITIAL_STATE__, window.__NEXT_DATA__].filter(Boolean);
+                  for (const root of roots) {
+                    channelUid = findChannelUid(root);
+                    if (channelUid) break;
+                  }
+
                   const resources = performance.getEntriesByType('resource').map((entry) => entry.name || '');
                   for (const resourceUrl of resources) {
-                    const match = resourceUrl.match(/\\/i\\/v2\\/channels\\/([^/]+)\\//);
-                    if (match) {
-                      channelUid = decodeURIComponent(match[1]);
-                      break;
+                    const match = resourceUrl.match(/\\/i\\/v2\\/channels\\/([^/]+)\\/products\\/(\\d+)/);
+                    if (!match) continue;
+                    if (!channelUid) channelUid = decodeURIComponent(match[1]);
+                    if (match[2] === productNo) observedApiUrl = resourceUrl;
+                  }
+
+                  if (!channelUid) {
+                    send({ ok: false, error: 'CHANNEL_UID_NOT_FOUND', pageUrl: location.href, title: document.title });
+                    return;
+                  }
+
+                  const candidates = [];
+                  if (observedApiUrl) candidates.push(observedApiUrl);
+                  candidates.push(`/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
+                  candidates.push(`https://smartstore.naver.com/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
+
+                  let response = null;
+                  let text = '';
+                  let usedApiUrl = null;
+                  const attempts = [];
+                  for (const apiUrl of [...new Set(candidates)]) {
+                    try {
+                      const current = await fetch(apiUrl, {
+                        credentials: 'include',
+                        headers: { accept: 'application/json, text/plain, */*' }
+                      });
+                      const currentText = await current.text();
+                      attempts.push({ url: apiUrl, status: current.status });
+                      if (current.ok) {
+                        response = current;
+                        text = currentText;
+                        usedApiUrl = apiUrl;
+                        break;
+                      }
+                      if (!response) {
+                        response = current;
+                        text = currentText;
+                        usedApiUrl = apiUrl;
+                      }
+                    } catch (error) {
+                      attempts.push({ url: apiUrl, error: String(error) });
                     }
                   }
-                }
 
-                if (!channelUid) {
-                  return JSON.stringify({ ok: false, error: 'CHANNEL_UID_NOT_FOUND', pageUrl: location.href, title: document.title });
-                }
+                  if (!response || !response.ok) {
+                    send({
+                      ok: false,
+                      error: 'PRODUCT_API_FAILED',
+                      status: response ? response.status : null,
+                      pageUrl: location.href,
+                      apiUrl: usedApiUrl,
+                      attempts,
+                      preview: text.replace(/\\s+/g, ' ').slice(0, 300)
+                    });
+                    return;
+                  }
 
-                const apiUrl = `/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`;
-                const response = await fetch(apiUrl, {
-                  credentials: 'include',
-                  headers: { accept: 'application/json, text/plain, */*' }
-                });
-                const text = await response.text();
+                  let data;
+                  try {
+                    data = JSON.parse(text);
+                  } catch (error) {
+                    send({ ok: false, error: 'INVALID_PRODUCT_JSON', status: response.status, apiUrl: usedApiUrl, preview: text.slice(0, 300) });
+                    return;
+                  }
 
-                if (!response.ok) {
-                  return JSON.stringify({
-                    ok: false,
-                    error: 'PRODUCT_API_FAILED',
-                    status: response.status,
-                    pageUrl: location.href,
-                    apiUrl,
-                    preview: text.replace(/\\s+/g, ' ').slice(0, 220)
+                  const product = data.originProduct && typeof data.originProduct === 'object'
+                    ? data.originProduct
+                    : data;
+                  const optionInfo = product?.detailAttribute?.optionInfo
+                    || data?.detailAttribute?.optionInfo
+                    || data?.optionInfo
+                    || data;
+                  const combinations = Array.isArray(optionInfo?.optionCombinations)
+                    ? optionInfo.optionCombinations
+                    : [];
+
+                  const options = combinations.map((option) => {
+                    const stock = Number(option.stockQuantity);
+                    return {
+                      id: option.id ?? null,
+                      optionName1: option.optionName1 ?? null,
+                      optionName2: option.optionName2 ?? null,
+                      optionName3: option.optionName3 ?? null,
+                      stockQuantity: Number.isFinite(stock) ? stock : null,
+                      available: option.usable !== false && Number.isFinite(stock) && stock > 0
+                    };
                   });
-                }
 
-                let data;
-                try {
-                  data = JSON.parse(text);
+                  send({
+                    ok: true,
+                    pageUrl: location.href,
+                    apiUrl: usedApiUrl,
+                    title: product?.name || data?.smartstoreChannelProduct?.channelProductName || document.title,
+                    channelUid,
+                    id: product?.id ?? data?.id ?? null,
+                    productNo: data?.productNo ?? productNo,
+                    statusType: product?.statusType || data?.statusType || data?.productStatusType || null,
+                    stockQuantity: product?.stockQuantity ?? data?.stockQuantity ?? null,
+                    optionCombinationCount: options.length,
+                    options,
+                    attempts
+                  });
                 } catch (error) {
-                  return JSON.stringify({ ok: false, error: 'INVALID_PRODUCT_JSON', status: response.status, preview: text.slice(0, 220) });
+                  send({ ok: false, error: 'JS_ERROR', message: String(error && (error.stack || error.message) || error) });
                 }
-
-                const combinations = Array.isArray(data.optionCombinations) ? data.optionCombinations : [];
-                const options = combinations.map((option) => {
-                  const stock = Number(option.stockQuantity);
-                  return {
-                    id: option.id ?? null,
-                    optionName1: option.optionName1 ?? null,
-                    optionName2: option.optionName2 ?? null,
-                    optionName3: option.optionName3 ?? null,
-                    stockQuantity: Number.isFinite(stock) ? stock : null,
-                    available: option.usable !== false && Number.isFinite(stock) && stock > 0
-                  };
-                });
-
-                return JSON.stringify({
-                  ok: true,
-                  pageUrl: location.href,
-                  title: data.name || document.title,
-                  channelUid,
-                  id: data.id ?? null,
-                  productNo: data.productNo ?? productNo,
-                  statusType: data.statusType || data.productStatusType || null,
-                  stockQuantity: data.stockQuantity ?? null,
-                  optionCombinationCount: options.length,
-                  options
-                });
-              } catch (error) {
-                return JSON.stringify({ ok: false, error: 'JS_ERROR', message: String(error && (error.stack || error.message) || error) });
-              }
+              })();
+              return 'STARTED';
             })()
             """;
 
-        webView.evaluateJavascript(script, raw -> {
-            inspectButton.setEnabled(true);
-            String json = decodeJavascriptResult(raw);
-            try {
-                JSONObject result = new JSONObject(json);
-                if (result.optBoolean("ok", false)) {
-                    statusText.setText("옵션 재고 조회 성공");
-                    resultText.setText(formatInventory(result));
-                } else {
-                    statusText.setText("옵션 재고 조회 실패 · " + result.optString("error", "UNKNOWN"));
-                    resultText.setText(result.toString(2));
-                }
-            } catch (Exception error) {
-                statusText.setText("결과 파싱 실패");
-                resultText.setText("raw:\n" + raw + "\n\nerror:\n" + error);
-            }
-        });
+        webView.evaluateJavascript(script, ignored -> {});
     }
 
-    private String decodeJavascriptResult(String raw) {
-        if (raw == null || "null".equals(raw)) return "{}";
+    private class InventoryBridge {
+        @JavascriptInterface
+        public void onResult(String json) {
+            runOnUiThread(() -> handleInventoryResult(json));
+        }
+    }
+
+    private void handleInventoryResult(String json) {
+        inspectButton.setEnabled(true);
         try {
-            Object value = new JSONTokener(raw).nextValue();
-            return value instanceof String ? (String) value : raw;
-        } catch (Exception ignored) {
-            return raw;
+            JSONObject result = new JSONObject(json);
+            if (result.optBoolean("ok", false)) {
+                statusText.setText("옵션 재고 조회 성공");
+                resultText.setText(formatInventory(result));
+            } else {
+                statusText.setText("옵션 재고 조회 실패 · " + result.optString("error", "UNKNOWN"));
+                resultText.setText(result.toString(2));
+            }
+        } catch (Exception error) {
+            statusText.setText("결과 파싱 실패");
+            resultText.setText("raw:\n" + json + "\n\nerror:\n" + error);
         }
     }
 
@@ -304,8 +345,8 @@ public class MainActivity extends Activity {
             }
         }
 
-        output.append("\n--- raw ---\n");
-        output.append(result.toString());
+        output.append("\nAPI: ").append(result.optString("apiUrl", "-")).append('\n');
+        output.append("channelUid: ").append(result.optString("channelUid", "-")).append('\n');
         return output.toString();
     }
 
@@ -324,6 +365,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (webView != null) {
+            webView.removeJavascriptInterface("RestockBridge");
             webView.stopLoading();
             webView.destroy();
         }
