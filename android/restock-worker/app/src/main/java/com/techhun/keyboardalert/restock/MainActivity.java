@@ -5,6 +5,8 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -15,10 +17,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -28,6 +33,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -36,17 +42,17 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_LOGIN = 9001;
-    private static final int[] INTERVAL_VALUES = {15, 30, 60};
-    private static final String[] INTERVAL_LABELS = {"15초", "30초", "60초"};
     private static final String SMARTSTORE_HOME = "https://m.smartstore.naver.com/";
-    private static final int PRODUCT_PREVIEW_LIMIT = 4;
 
     private static final int BG = Color.rgb(247, 248, 250);
     private static final int WHITE = Color.WHITE;
@@ -65,15 +71,16 @@ public class MainActivity extends Activity {
         @Override public void run() {
             renderProducts();
             refreshSessionButton();
-            handler.postDelayed(this, 2000L);
+            handler.postDelayed(this, 2500L);
         }
     };
 
     private LinearLayout productList;
+    private ScrollView productScroll;
     private TextView sessionButton;
-    private TextView[] intervalChips;
     private WebView webView;
     private Dialog optionDialog;
+    private Dialog addDialog;
 
     private JSONArray latestOptions = new JSONArray();
     private String latestTitle = "";
@@ -86,8 +93,6 @@ public class MainActivity extends Activity {
     private boolean autoInspect;
     private boolean loginLaunching;
     private boolean optionLoadInProgress;
-    private boolean showAllProducts;
-    private int intervalSeconds = 30;
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -96,71 +101,75 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(false);
         requestNotificationPermissionIfNeeded();
         ProductStore.migrateLegacyIfNeeded(this);
-        intervalSeconds = MonitorPrefs.intervalSeconds(this);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BG);
-
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(24), dp(20), dp(40));
-        scroll.addView(content);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                var bars = insets.getInsets(WindowInsets.Type.systemBars());
+                top = bars.top;
+                bottom = bars.bottom;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(dp(20), top + dp(10), dp(20), bottom + dp(10));
+            return insets;
+        });
 
         LinearLayout topRow = new LinearLayout(this);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
-        content.addView(topRow, matchWrap());
+        root.addView(topRow, matchWrap());
 
-        TextView title = text("재입고 알림", 30, TEXT, Typeface.BOLD);
-        topRow.addView(title, new LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            1f
-        ));
+        ImageView appIcon = new ImageView(this);
+        appIcon.setImageResource(R.mipmap.ic_launcher);
+        appIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        topRow.addView(appIcon, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+        View spacer = new View(this);
+        topRow.addView(spacer, new LinearLayout.LayoutParams(0, dp(1), 1f));
 
         sessionButton = text("로그인", 14, BLUE, Typeface.BOLD);
         sessionButton.setGravity(Gravity.CENTER);
-        sessionButton.setPadding(dp(15), dp(9), dp(15), dp(9));
+        sessionButton.setPadding(dp(14), dp(9), dp(14), dp(9));
         sessionButton.setOnClickListener(v -> handleSessionAction());
         topRow.addView(sessionButton);
+
+        ImageView settings = new ImageView(this);
+        settings.setImageResource(R.drawable.ic_settings);
+        settings.setColorFilter(TEXT);
+        settings.setPadding(dp(10), dp(10), dp(10), dp(10));
+        settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+        LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(dp(42), dp(42));
+        settingsLp.leftMargin = dp(4);
+        topRow.addView(settings, settingsLp);
         refreshSessionButton();
 
         LinearLayout addRow = new LinearLayout(this);
         addRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        addRow.setPadding(0, dp(18), 0, dp(10));
-        content.addView(addRow, matchWrap());
+        addRow.setPadding(0, dp(10), 0, dp(8));
+        root.addView(addRow, matchWrap());
         TextView add = text("+ 상품 추가", 15, BLUE, Typeface.BOLD);
         add.setPadding(dp(12), dp(8), 0, dp(8));
-        add.setOnClickListener(v -> addProduct());
+        add.setOnClickListener(v -> showAddProductDialog());
         addRow.addView(add);
+
+        productScroll = new ScrollView(this);
+        productScroll.setFillViewport(true);
+        productScroll.setClipToPadding(false);
+        productScroll.setPadding(0, 0, 0, dp(12));
+        root.addView(productScroll, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ));
 
         productList = new LinearLayout(this);
         productList.setOrientation(LinearLayout.VERTICAL);
-        content.addView(productList);
-
-        LinearLayout settings = surface(20, 18);
-        LinearLayout.LayoutParams settingsParams = sectionParams();
-        settingsParams.topMargin = dp(10);
-        content.addView(settings, settingsParams);
-        settings.addView(text("조회 주기", 14, TEXT, Typeface.BOLD));
-
-        LinearLayout intervalRow = new LinearLayout(this);
-        intervalRow.setPadding(0, dp(12), 0, 0);
-        settings.addView(intervalRow, matchWrap());
-        intervalChips = new TextView[INTERVAL_VALUES.length];
-        for (int i = 0; i < INTERVAL_VALUES.length; i++) {
-            final int seconds = INTERVAL_VALUES[i];
-            TextView chip = text(INTERVAL_LABELS[i], 14, SUB, Typeface.BOLD);
-            chip.setGravity(Gravity.CENTER);
-            chip.setOnClickListener(v -> {
-                intervalSeconds = seconds;
-                MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, seconds).apply();
-                updateIntervalChips();
-            });
-            intervalChips[i] = chip;
-            intervalRow.addView(chip, rowParams(1f, i == 0 ? 0 : 8));
-        }
-        updateIntervalChips();
+        productScroll.addView(productList, matchWrap());
 
         webView = new WebView(this);
         configureWebView(webView);
@@ -178,20 +187,28 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        content.addView(webView, new LinearLayout.LayoutParams(dp(1), dp(1)));
+        root.addView(webView, new LinearLayout.LayoutParams(dp(1), dp(1)));
 
-        setContentView(scroll);
+        setContentView(root);
+        root.requestApplyInsets();
         renderProducts();
     }
 
     private void handleSessionAction() {
-        if (hasNaverSession()) {
-            ProductStore.disableAll(this);
-            syncMonitorService();
-            clearAppLogin();
-        } else {
+        if (!hasNaverSession()) {
             openLoginForExistingProduct();
+            return;
         }
+        new AlertDialog.Builder(this)
+            .setTitle("로그아웃할까요?")
+            .setMessage("켜진 재입고 알림도 함께 꺼져요.")
+            .setNegativeButton("취소", null)
+            .setPositiveButton("로그아웃", (d, w) -> {
+                ProductStore.disableAll(this);
+                syncMonitorService();
+                clearAppLogin();
+            })
+            .show();
     }
 
     private boolean hasNaverSession() {
@@ -214,22 +231,139 @@ public class MainActivity extends Activity {
         return optionLoadInProgress || (optionDialog != null && optionDialog.isShowing());
     }
 
-    private void addProduct() {
+    private void showAddProductDialog() {
         if (optionFlowBusy()) {
             toast("옵션을 불러오는 중이에요.");
             return;
         }
+        if (addDialog != null && addDialog.isShowing()) return;
+
+        Dialog dialog = new Dialog(this);
+        addDialog = dialog;
+        LinearLayout panel = surface(24, 20);
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(header, matchWrap());
+        header.addView(text("상품 추가", 21, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
+        TextView close = text("닫기", 14, SUB, Typeface.BOLD);
+        close.setPadding(dp(12), dp(8), 0, dp(8));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close);
+
+        TextView label = text("SmartStore 상품 주소", 13, SUB, Typeface.NORMAL);
+        label.setPadding(0, dp(16), 0, dp(8));
+        panel.addView(label);
+
+        LinearLayout field = new LinearLayout(this);
+        field.setGravity(Gravity.CENTER_VERTICAL);
+        field.setPadding(dp(14), 0, dp(8), 0);
+        field.setBackground(roundRect(FIELD, 14));
+        panel.addView(field, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(52)
+        ));
+
         EditText input = new EditText(this);
         input.setSingleLine(true);
+        input.setTextSize(14);
+        input.setTextColor(TEXT);
+        input.setHintTextColor(SUB);
+        input.setHint("https://smartstore.naver.com/...");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("SmartStore 상품 URL");
-        input.setPadding(dp(12), dp(8), dp(12), dp(8));
-        new AlertDialog.Builder(this)
-            .setTitle("상품 추가")
-            .setView(input)
-            .setNegativeButton("취소", null)
-            .setPositiveButton("다음", (d, w) -> loadProductForEdit(input.getText().toString().trim(), null))
-            .show();
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setPadding(0, 0, dp(8), 0);
+        field.addView(input, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            1f
+        ));
+
+        ImageView paste = new ImageView(this);
+        paste.setImageResource(R.drawable.ic_clipboard);
+        paste.setPadding(dp(9), dp(9), dp(9), dp(9));
+        field.addView(paste, new LinearLayout.LayoutParams(dp(42), dp(42)));
+
+        String clipboardUrl = readClipboardSmartStoreUrl();
+        paste.setColorFilter(clipboardUrl.isBlank() ? SUB : BLUE);
+        paste.setAlpha(clipboardUrl.isBlank() ? 0.55f : 1f);
+        paste.setOnClickListener(v -> {
+            String value = readClipboardSmartStoreUrl();
+            if (value.isBlank()) {
+                toast("클립보드에 SmartStore 상품 링크가 없어요.");
+                return;
+            }
+            input.setText(value);
+            input.setSelection(value.length());
+        });
+
+        if (!clipboardUrl.isBlank()) {
+            TextView clipboardHint = text("클립보드의 상품 링크 붙여넣기", 12, BLUE, Typeface.BOLD);
+            clipboardHint.setGravity(Gravity.CENTER);
+            clipboardHint.setPadding(dp(12), dp(8), dp(12), dp(8));
+            clipboardHint.setBackground(roundRect(BLUE_SOFT, 12));
+            LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            hintLp.topMargin = dp(8);
+            panel.addView(clipboardHint, hintLp);
+            clipboardHint.setOnClickListener(v -> {
+                input.setText(clipboardUrl);
+                input.setSelection(clipboardUrl.length());
+            });
+        }
+
+        TextView load = text("상품 불러오기", 15, Color.WHITE, Typeface.BOLD);
+        load.setGravity(Gravity.CENTER);
+        load.setPadding(0, dp(14), 0, dp(14));
+        LinearLayout.LayoutParams loadLp = matchWrap();
+        loadLp.topMargin = dp(18);
+        panel.addView(load, loadLp);
+        updateLoadButton(load, input.getText().toString());
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateLoadButton(load, s == null ? "" : s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        load.setOnClickListener(v -> {
+            String url = input.getText().toString().trim();
+            if (!isSmartStoreProductUrl(url)) return;
+            dialog.dismiss();
+            loadProductForEdit(url, null);
+        });
+
+        dialog.setContentView(panel);
+        dialog.setCancelable(true);
+        dialog.setOnDismissListener(d -> addDialog = null);
+        dialog.show();
+        sizeDialog(dialog, 0.92f);
+    }
+
+    private String readClipboardSmartStoreUrl() {
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null || !clipboard.hasPrimaryClip()) return "";
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence text = clip.getItemAt(0).coerceToText(this);
+            String value = text == null ? "" : text.toString().trim();
+            return isSmartStoreProductUrl(value) ? value : "";
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private void updateLoadButton(TextView button, String value) {
+        boolean valid = isSmartStoreProductUrl(value == null ? "" : value.trim());
+        button.setBackground(roundRect(valid ? BLUE : Color.rgb(190, 198, 207), 14));
+        button.setAlpha(valid ? 1f : 0.7f);
     }
 
     private void editProduct(JSONObject product) {
@@ -245,7 +379,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadProductForEdit(String url, String id) {
-        if (!url.startsWith("https://") || !url.contains("smartstore.naver.com")) {
+        if (!isSmartStoreProductUrl(url)) {
             toast("SmartStore 상품 URL을 확인해주세요.");
             return;
         }
@@ -343,15 +477,15 @@ public class MainActivity extends Activity {
         optionDialog = dialog;
         optionLoadInProgress = false;
         boolean[] committed = {false};
+        boolean[] selectedOnly = {false};
+        Set<String> collapsedGroups = new HashSet<>();
 
         LinearLayout panel = surface(24, 20);
-        panel.setBackground(roundRect(WHITE, 24));
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         panel.addView(header, matchWrap());
-        TextView dialogTitle = text("옵션 선택", 21, TEXT, Typeface.BOLD);
-        header.addView(dialogTitle, new LinearLayout.LayoutParams(
+        header.addView(text("옵션 선택", 21, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(
             0,
             LinearLayout.LayoutParams.WRAP_CONTENT,
             1f
@@ -362,12 +496,47 @@ public class MainActivity extends Activity {
         header.addView(close);
 
         TextView productName = text(titleSnapshot, 13, SUB, Typeface.NORMAL);
-        productName.setPadding(0, dp(5), 0, dp(14));
+        productName.setPadding(0, dp(5), 0, dp(12));
         panel.addView(productName);
 
+        EditText search = new EditText(this);
+        search.setSingleLine(true);
+        search.setTextSize(14);
+        search.setTextColor(TEXT);
+        search.setHintTextColor(SUB);
+        search.setHint("옵션 검색");
+        search.setBackground(roundRect(FIELD, 14));
+        search.setPadding(dp(14), 0, dp(14), 0);
+        panel.addView(search, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(48)
+        ));
+
+        LinearLayout filterRow = new LinearLayout(this);
+        filterRow.setGravity(Gravity.CENTER_VERTICAL);
+        filterRow.setPadding(0, dp(10), 0, dp(8));
+        panel.addView(filterRow, matchWrap());
+
+        TextView allChip = text("전체", 13, BLUE, Typeface.BOLD);
+        allChip.setGravity(Gravity.CENTER);
+        allChip.setPadding(dp(13), dp(8), dp(13), dp(8));
+        filterRow.addView(allChip);
+        TextView selectedChip = text("선택만", 13, SUB, Typeface.BOLD);
+        selectedChip.setGravity(Gravity.CENTER);
+        selectedChip.setPadding(dp(13), dp(8), dp(13), dp(8));
+        LinearLayout.LayoutParams selectedLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        selectedLp.leftMargin = dp(7);
+        filterRow.addView(selectedChip, selectedLp);
         TextView selectedCount = text("", 13, BLUE, Typeface.BOLD);
-        selectedCount.setPadding(0, 0, 0, dp(10));
-        panel.addView(selectedCount);
+        selectedCount.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        filterRow.addView(selectedCount, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
 
         ScrollView scroll = new ScrollView(this);
         LinearLayout optionList = new LinearLayout(this);
@@ -378,57 +547,29 @@ public class MainActivity extends Activity {
             dp(390)
         ));
 
-        LinearLayout[] rows = new LinearLayout[optionsSnapshot.length()];
-        TextView[] marks = new TextView[optionsSnapshot.length()];
-        for (int i = 0; i < optionsSnapshot.length(); i++) {
-            final int index = i;
-            JSONObject option = optionsSnapshot.optJSONObject(i);
-            int stock = option == null || option.isNull("stockQuantity")
-                ? -1
-                : option.optInt("stockQuantity", -1);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(14), dp(12), dp(14), dp(12));
-            LinearLayout.LayoutParams rowLp = matchWrap();
-            rowLp.bottomMargin = dp(8);
-            optionList.addView(row, rowLp);
-
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            row.addView(left, new LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ));
-            left.addView(text(optionLabel(option), 14, TEXT, Typeface.BOLD));
-            String stockLabel = stock > 0 ? "재고 " + stock + "개" : stock == 0 ? "품절" : "재고 확인 중";
-            TextView stockView = text(stockLabel, 12, stock > 0 ? GREEN : SUB, Typeface.NORMAL);
-            stockView.setPadding(0, dp(4), 0, 0);
-            left.addView(stockView);
-
-            TextView mark = text("", 19, BLUE, Typeface.BOLD);
-            mark.setGravity(Gravity.CENTER);
-            mark.setPadding(dp(12), 0, 0, 0);
-            row.addView(mark);
-            rows[i] = row;
-            marks[i] = mark;
-            applyOptionRowState(row, mark, checked[i]);
-
-            row.setOnClickListener(v -> {
-                checked[index] = !checked[index];
-                applyOptionRowState(rows[index], marks[index], checked[index]);
-                updateSelectedCount(selectedCount, checked);
-            });
-        }
-        updateSelectedCount(selectedCount, checked);
+        allChip.setOnClickListener(v -> {
+            selectedOnly[0] = false;
+            renderOptionList(optionList, optionsSnapshot, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
+        });
+        selectedChip.setOnClickListener(v -> {
+            selectedOnly[0] = true;
+            renderOptionList(optionList, optionsSnapshot, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
+        });
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                renderOptionList(optionList, optionsSnapshot, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        renderOptionList(optionList, optionsSnapshot, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
 
         TextView save = text("저장", 15, Color.WHITE, Typeface.BOLD);
         save.setGravity(Gravity.CENTER);
         save.setBackground(roundRect(BLUE, 14));
         save.setPadding(0, dp(14), 0, dp(14));
         LinearLayout.LayoutParams saveLp = matchWrap();
-        saveLp.topMargin = dp(8);
+        saveLp.topMargin = dp(10);
         panel.addView(save, saveLp);
         save.setOnClickListener(v -> {
             if (saveProductSelection(
@@ -454,22 +595,139 @@ public class MainActivity extends Activity {
             if (!committed[0]) clearPendingEdit();
         });
         dialog.show();
+        sizeDialog(dialog, 0.94f);
+    }
 
-        Window window = dialog.getWindow();
-        if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            WindowManager.LayoutParams lp = window.getAttributes();
-            lp.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
-            lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            lp.dimAmount = 0.32f;
-            window.setAttributes(lp);
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+    private void renderOptionList(
+        LinearLayout container,
+        JSONArray options,
+        boolean[] checked,
+        EditText search,
+        boolean[] selectedOnly,
+        Set<String> collapsedGroups,
+        TextView selectedCount,
+        TextView allChip,
+        TextView selectedChip
+    ) {
+        container.removeAllViews();
+        updateSelectedCount(selectedCount, checked);
+        allChip.setTextColor(selectedOnly[0] ? SUB : BLUE);
+        selectedChip.setTextColor(selectedOnly[0] ? BLUE : SUB);
+        allChip.setBackground(roundRect(selectedOnly[0] ? FIELD : BLUE_SOFT, 12));
+        selectedChip.setBackground(roundRect(selectedOnly[0] ? BLUE_SOFT : FIELD, 12));
+
+        String query = search.getText() == null
+            ? ""
+            : search.getText().toString().trim().toLowerCase(Locale.ROOT);
+        boolean grouped = hasSubOptions(options);
+        Map<String, List<Integer>> groups = new LinkedHashMap<>();
+
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            if (option == null) continue;
+            if (selectedOnly[0] && !checked[i]) continue;
+            String label = optionLabel(option);
+            if (!query.isBlank() && !label.toLowerCase(Locale.ROOT).contains(query)) continue;
+            String group = grouped ? option.optString("optionName1", "옵션") : "옵션";
+            if (group.isBlank() || "null".equals(group)) group = "옵션";
+            groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(i);
+        }
+
+        if (groups.isEmpty()) {
+            TextView empty = text(selectedOnly[0] ? "선택한 옵션이 없어요" : "검색 결과가 없어요", 13, SUB, Typeface.NORMAL);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, dp(36), 0, dp(36));
+            container.addView(empty, matchWrap());
+            return;
+        }
+
+        for (Map.Entry<String, List<Integer>> entry : groups.entrySet()) {
+            String group = entry.getKey();
+            List<Integer> indexes = entry.getValue();
+            boolean collapsed = query.isBlank() && collapsedGroups.contains(group);
+
+            if (grouped) {
+                LinearLayout groupRow = new LinearLayout(this);
+                groupRow.setGravity(Gravity.CENTER_VERTICAL);
+                groupRow.setPadding(dp(2), dp(10), dp(2), dp(9));
+                TextView groupTitle = text(group + "  " + indexes.size(), 14, TEXT, Typeface.BOLD);
+                groupRow.addView(groupTitle, new LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ));
+                TextView arrow = text(collapsed ? "›" : "⌄", 20, SUB, Typeface.NORMAL);
+                groupRow.addView(arrow);
+                groupRow.setOnClickListener(v -> {
+                    if (collapsedGroups.contains(group)) collapsedGroups.remove(group);
+                    else collapsedGroups.add(group);
+                    renderOptionList(container, options, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
+                });
+                container.addView(groupRow, matchWrap());
+            }
+
+            if (collapsed) continue;
+            for (int index : indexes) {
+                JSONObject option = options.optJSONObject(index);
+                int stock = option == null || option.isNull("stockQuantity")
+                    ? -1
+                    : option.optInt("stockQuantity", -1);
+
+                LinearLayout row = new LinearLayout(this);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(14), dp(11), dp(14), dp(11));
+                row.setBackground(roundRect(checked[index] ? BLUE_SOFT : FIELD, 14));
+                LinearLayout.LayoutParams rowLp = matchWrap();
+                rowLp.bottomMargin = dp(7);
+                container.addView(row, rowLp);
+
+                LinearLayout left = new LinearLayout(this);
+                left.setOrientation(LinearLayout.VERTICAL);
+                row.addView(left, new LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ));
+                String displayLabel = grouped ? optionSubLabel(option) : optionLabel(option);
+                left.addView(text(displayLabel, 14, TEXT, Typeface.BOLD));
+                String stockLabel = stock > 0 ? "재고 " + stock + "개" : stock == 0 ? "품절" : "재고 확인 중";
+                TextView stockView = text(stockLabel, 12, stock > 0 ? GREEN : SUB, Typeface.NORMAL);
+                stockView.setPadding(0, dp(3), 0, 0);
+                left.addView(stockView);
+
+                TextView mark = text(checked[index] ? "✓" : "", 19, BLUE, Typeface.BOLD);
+                mark.setGravity(Gravity.CENTER);
+                mark.setPadding(dp(12), 0, 0, 0);
+                row.addView(mark);
+                row.setOnClickListener(v -> {
+                    checked[index] = !checked[index];
+                    renderOptionList(container, options, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
+                });
+            }
         }
     }
 
-    private void applyOptionRowState(LinearLayout row, TextView mark, boolean selected) {
-        row.setBackground(roundRect(selected ? BLUE_SOFT : FIELD, 14));
-        mark.setText(selected ? "✓" : "");
+    private boolean hasSubOptions(JSONArray options) {
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            if (option == null) continue;
+            String second = option.optString("optionName2", "");
+            String third = option.optString("optionName3", "");
+            if ((!second.isBlank() && !"null".equals(second)) || (!third.isBlank() && !"null".equals(third))) return true;
+        }
+        return false;
+    }
+
+    private String optionSubLabel(JSONObject option) {
+        if (option == null) return "옵션";
+        StringBuilder label = new StringBuilder();
+        for (String key : new String[]{"optionName2", "optionName3"}) {
+            String value = option.optString(key, "");
+            if (value.isBlank() || "null".equals(value)) continue;
+            if (label.length() > 0) label.append(" / ");
+            label.append(value);
+        }
+        return label.length() == 0 ? optionLabel(option) : label.toString();
     }
 
     private void updateSelectedCount(TextView view, boolean[] checked) {
@@ -540,8 +798,9 @@ public class MainActivity extends Activity {
 
     private void renderProducts() {
         if (productList == null) return;
+        int oldScroll = productScroll == null ? 0 : productScroll.getScrollY();
         productList.removeAllViews();
-        JSONArray products = ProductStore.list(this);
+        JSONArray products = orderedProducts(ProductStore.list(this));
         if (products.length() == 0) {
             LinearLayout empty = surface(20, 18);
             TextView value = text("등록된 상품이 없어요", 15, SUB, Typeface.NORMAL);
@@ -551,23 +810,19 @@ public class MainActivity extends Activity {
             return;
         }
 
-        int visibleCount = showAllProducts
-            ? products.length()
-            : Math.min(PRODUCT_PREVIEW_LIMIT, products.length());
-
-        for (int i = 0; i < visibleCount; i++) {
+        for (int i = 0; i < products.length(); i++) {
             JSONObject product = products.optJSONObject(i);
             if (product == null) continue;
             boolean enabled = product.optBoolean("enabled", false);
 
-            LinearLayout card = surface(20, 18);
+            LinearLayout card = surface(20, 16);
             productList.addView(card, sectionParams());
 
             LinearLayout titleRow = new LinearLayout(this);
             titleRow.setGravity(Gravity.TOP);
             card.addView(titleRow, matchWrap());
 
-            TextView name = text(product.optString("title", "SmartStore 상품"), 17, TEXT, Typeface.BOLD);
+            TextView name = text(product.optString("title", "SmartStore 상품"), 16, TEXT, Typeface.BOLD);
             titleRow.addView(name, new LinearLayout.LayoutParams(
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -576,7 +831,7 @@ public class MainActivity extends Activity {
 
             TextView badge = text(enabled ? "알림 켜짐" : "알림 꺼짐", 12, enabled ? GREEN : SUB, Typeface.BOLD);
             badge.setGravity(Gravity.CENTER);
-            badge.setPadding(dp(10), dp(6), dp(10), dp(6));
+            badge.setPadding(dp(9), dp(5), dp(9), dp(5));
             badge.setBackground(roundRect(enabled ? GREEN_SOFT : FIELD, 12));
             LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -586,7 +841,7 @@ public class MainActivity extends Activity {
             titleRow.addView(badge, badgeParams);
 
             TextView delete = text("삭제", 12, RED, Typeface.BOLD);
-            delete.setPadding(dp(10), dp(6), 0, dp(6));
+            delete.setPadding(dp(9), dp(5), 0, dp(5));
             delete.setOnClickListener(v -> confirmDelete(product));
             titleRow.addView(delete);
 
@@ -596,18 +851,18 @@ public class MainActivity extends Activity {
             else if (labels.size() == 1) optionSummary = labels.values().iterator().next();
             else optionSummary = labels.values().iterator().next() + " 외 " + (labels.size() - 1) + "개";
             TextView options = text(optionSummary, 13, SUB, Typeface.NORMAL);
-            options.setPadding(0, dp(7), 0, 0);
+            options.setPadding(0, dp(6), 0, 0);
             card.addView(options);
 
             String last = product.optString("lastStatus", "");
             if (enabled && !last.isBlank()) {
                 TextView state = text(last, 12, SUB, Typeface.NORMAL);
-                state.setPadding(0, dp(7), 0, 0);
+                state.setPadding(0, dp(5), 0, 0);
                 card.addView(state);
             }
 
             LinearLayout actions = new LinearLayout(this);
-            actions.setPadding(0, dp(14), 0, 0);
+            actions.setPadding(0, dp(11), 0, 0);
             card.addView(actions, matchWrap());
 
             Button toggle = enabled
@@ -621,18 +876,19 @@ public class MainActivity extends Activity {
             actions.addView(edit, rowParams(0.72f, 8));
         }
 
-        if (products.length() > PRODUCT_PREVIEW_LIMIT) {
-            int hidden = products.length() - PRODUCT_PREVIEW_LIMIT;
-            String label = showAllProducts ? "접기" : hidden + "개 더보기";
-            TextView more = text(label, 14, BLUE, Typeface.BOLD);
-            more.setGravity(Gravity.CENTER);
-            more.setPadding(0, dp(12), 0, dp(12));
-            more.setOnClickListener(v -> {
-                showAllProducts = !showAllProducts;
-                renderProducts();
-            });
-            productList.addView(more, matchWrap());
+        if (productScroll != null) productScroll.post(() -> productScroll.scrollTo(0, oldScroll));
+    }
+
+    private JSONArray orderedProducts(JSONArray source) {
+        JSONArray ordered = new JSONArray();
+        for (int pass = 0; pass < 2; pass++) {
+            boolean wanted = pass == 0;
+            for (int i = 0; i < source.length(); i++) {
+                JSONObject product = source.optJSONObject(i);
+                if (product != null && product.optBoolean("enabled", false) == wanted) ordered.put(product);
+            }
         }
+        return ordered;
     }
 
     private void toggleProduct(JSONObject product) {
@@ -649,6 +905,7 @@ public class MainActivity extends Activity {
         ProductStore.setEnabled(this, id, enable);
         syncMonitorService();
         renderProducts();
+        if (productScroll != null) productScroll.post(() -> productScroll.smoothScrollTo(0, 0));
     }
 
     private void syncMonitorService() {
@@ -658,7 +915,6 @@ public class MainActivity extends Activity {
             MonitorPrefs.setRunning(this, false);
             return;
         }
-        MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, intervalSeconds).apply();
         if (!isRunning()) startForegroundService(new Intent(this, MonitorService.class));
     }
 
@@ -742,15 +998,6 @@ public class MainActivity extends Activity {
         return MonitorPrefs.prefs(this).getBoolean(MonitorPrefs.KEY_RUNNING, false);
     }
 
-    private void updateIntervalChips() {
-        if (intervalChips == null) return;
-        for (int i = 0; i < intervalChips.length; i++) {
-            boolean selected = INTERVAL_VALUES[i] == intervalSeconds;
-            intervalChips[i].setTextColor(selected ? BLUE : SUB);
-            intervalChips[i].setBackground(roundRect(selected ? BLUE_SOFT : FIELD, 12));
-        }
-    }
-
     private Map<String, String> labelMap(JSONObject object) {
         Map<String, String> result = new LinkedHashMap<>();
         if (object == null) return result;
@@ -788,12 +1035,29 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true);
     }
 
+    private boolean isSmartStoreProductUrl(String url) {
+        if (url == null || !url.startsWith("https://")) return false;
+        return url.contains("smartstore.naver.com/") && url.contains("/products/");
+    }
+
     private boolean isProductUrl(String url) {
         return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
     }
 
     private boolean isLoginUrl(String url) {
         return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login"));
+    }
+
+    private void sizeDialog(Dialog dialog, float widthRatio) {
+        Window window = dialog.getWindow();
+        if (window == null) return;
+        window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        WindowManager.LayoutParams lp = window.getAttributes();
+        lp.width = (int) (getResources().getDisplayMetrics().widthPixels * widthRatio);
+        lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        lp.dimAmount = 0.32f;
+        window.setAttributes(lp);
+        window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
     }
 
     private int dp(int value) {
@@ -842,7 +1106,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams rowParams(float weight, int left) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(46), weight);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(43), weight);
         params.leftMargin = dp(left);
         return params;
     }
@@ -894,6 +1158,7 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         if (optionDialog != null && optionDialog.isShowing()) optionDialog.dismiss();
+        if (addDialog != null && addDialog.isShowing()) addDialog.dismiss();
         if (webView != null) {
             webView.removeJavascriptInterface("RestockBridge");
             webView.stopLoading();
