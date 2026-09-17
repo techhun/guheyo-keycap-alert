@@ -1,13 +1,13 @@
 package com.techhun.keyboardalert.restock;
 
 import android.app.Activity;
+import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
-import android.view.View;
 import android.view.WindowInsets;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -91,13 +91,22 @@ public class SettingsActivity extends Activity {
         note.setPadding(0, dp(10), 0, 0);
         card.addView(note);
 
-        TextView version = text("버전  " + BuildConfig.VERSION_NAME, 13, SUB, Typeface.NORMAL);
+        TextView version = text("버전  " + versionName(), 13, SUB, Typeface.NORMAL);
         LinearLayout.LayoutParams versionLp = matchWrap();
         versionLp.topMargin = dp(22);
         root.addView(version, versionLp);
 
         setContentView(root);
         root.requestApplyInsets();
+    }
+
+    private String versionName() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "" : info.versionName;
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private void refreshChips() {
