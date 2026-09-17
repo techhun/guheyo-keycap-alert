@@ -55,9 +55,7 @@ public class MonitorService extends Service {
     private final Runnable resultTimeout = () -> {
         if (!awaitingResult || stopping) return;
         awaitingResult = false;
-        String title = currentProduct == null ? "상품" : currentProduct.optString("title", "상품");
         markCurrentFailure("조회 시간 초과");
-        updateOngoingNotification(title + " · 조회 시간 초과");
         scheduleNextProduct();
     };
 
@@ -75,18 +73,21 @@ public class MonitorService extends Service {
         }
 
         stopping = false;
-        products = ProductStore.list(this);
+        products = ProductStore.enabledList(this);
         if (products.length() == 0) {
-            MonitorPrefs.updateStatus(this, "감시 상품 없음");
+            MonitorPrefs.setRunning(this, false);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         MonitorPrefs.setRunning(this, true);
         acquireWakeLock();
-        startForeground(NOTIFICATION_MONITOR, buildOngoingNotification("감시 준비 중"));
+        startForeground(NOTIFICATION_MONITOR, buildOngoingNotification(products.length() + "개 상품 감시 중"));
         ensureWebView();
-        bootstrapSession();
+
+        if (!bootstrapReady) {
+            bootstrapSession();
+        }
         return START_STICKY;
     }
 
@@ -99,7 +100,9 @@ public class MonitorService extends Service {
         settings.setDomStorageEnabled(true);
         settings.setLoadsImagesAutomatically(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString().replace("; wv)", ")").replace("Version/4.0 ", ""));
+        settings.setUserAgentString(settings.getUserAgentString()
+            .replace("; wv)", ")")
+            .replace("Version/4.0 ", ""));
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
@@ -109,8 +112,8 @@ public class MonitorService extends Service {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 if (stopping) return;
                 if (isLoginUrl(url)) {
-                    setStatus("네이버 로그인 필요");
-                    updateOngoingNotification("로그인이 필요해요 · 앱을 열어주세요");
+                    setStatus("로그인 필요");
+                    updateOngoingNotification("로그인이 필요해요");
                 }
             }
 
@@ -118,8 +121,8 @@ public class MonitorService extends Service {
             public void onPageFinished(WebView view, String url) {
                 if (stopping) return;
                 if (isLoginUrl(url)) {
-                    setStatus("네이버 로그인 필요");
-                    updateOngoingNotification("로그인이 필요해요 · 앱에서 다시 로그인해주세요");
+                    setStatus("로그인 필요");
+                    updateOngoingNotification("앱에서 다시 로그인해주세요");
                     stopSelf();
                     return;
                 }
@@ -128,15 +131,16 @@ public class MonitorService extends Service {
                 if (mode == Mode.BOOTSTRAP && !bootstrapReady) {
                     bootstrapReady = true;
                     currentIndex = 0;
-                    handler.postDelayed(MonitorService.this::checkCurrentProduct, 600L);
+                    handler.postDelayed(MonitorService.this::checkCurrentProduct, 500L);
                 } else if (mode == Mode.DISCOVERY) {
-                    handler.postDelayed(MonitorService.this::runDiscoveryCheck, 800L);
+                    handler.postDelayed(MonitorService.this::runDiscoveryCheck, 700L);
                 }
             }
         });
     }
 
     private void bootstrapSession() {
+        products = ProductStore.enabledList(this);
         JSONObject first = products.optJSONObject(0);
         if (first == null) {
             stopSelf();
@@ -144,12 +148,16 @@ public class MonitorService extends Service {
         }
         mode = Mode.BOOTSTRAP;
         bootstrapReady = false;
-        updateOngoingNotification("SmartStore 세션 준비 중");
         webView.loadUrl(first.optString("url"));
     }
 
     private void checkCurrentProduct() {
-        if (stopping || !bootstrapReady || products.length() == 0 || awaitingResult) return;
+        if (stopping || !bootstrapReady || awaitingResult) return;
+        products = ProductStore.enabledList(this);
+        if (products.length() == 0) {
+            stopSelf();
+            return;
+        }
         if (currentIndex >= products.length()) currentIndex = 0;
         currentProduct = products.optJSONObject(currentIndex);
         if (currentProduct == null) {
@@ -157,10 +165,7 @@ public class MonitorService extends Service {
             return;
         }
 
-        String title = currentProduct.optString("title", "상품");
         String apiUrl = currentProduct.optString("apiUrl", "");
-        updateOngoingNotification(title + " · 재고 확인 중");
-
         if (apiUrl.isBlank()) {
             mode = Mode.DISCOVERY;
             webView.loadUrl(currentProduct.optString("url"));
@@ -175,6 +180,12 @@ public class MonitorService extends Service {
 
     private void runDiscoveryCheck() {
         if (stopping || awaitingResult || currentProduct == null) return;
+        JSONObject latest = ProductStore.find(this, currentProduct.optString("id"));
+        if (latest == null || !latest.optBoolean("enabled", false)) {
+            scheduleNextProduct();
+            return;
+        }
+        currentProduct = latest;
         awaitingResult = true;
         handler.postDelayed(resultTimeout, RESULT_TIMEOUT_MS);
         webView.evaluateJavascript(InventoryScript.SCRIPT, ignored -> {});
@@ -196,18 +207,41 @@ public class MonitorService extends Service {
             return;
         }
 
+        JSONObject latest = ProductStore.find(this, currentProduct.optString("id"));
+        if (latest == null || !latest.optBoolean("enabled", false)) {
+            scheduleNextProduct();
+            return;
+        }
+        currentProduct = latest;
+
         try {
             JSONObject result = new JSONObject(json);
             if (!result.optBoolean("ok", false)) {
                 String error = result.optString("error", "UNKNOWN");
                 int status = result.optInt("status", 0);
                 if (status == 401 || status == 403) {
-                    setStatus("네이버 로그인 필요");
-                    updateOngoingNotification("로그인이 필요해요 · 앱을 열어주세요");
+                    setStatus("로그인 필요");
+                    updateOngoingNotification("앱에서 다시 로그인해주세요");
                     stopSelf();
                     return;
                 }
-                markCurrentFailure("조회 실패 · " + error + (status > 0 ? " (HTTP " + status + ")" : ""));
+
+                // 저장된 빠른 API가 더 이상 유효하지 않으면 이 상품만 다시 탐색한다.
+                if (mode == Mode.DIRECT && (
+                    "PRODUCT_API_FAILED".equals(error)
+                        || "API_URL_MISSING".equals(error)
+                        || status == 204
+                        || status == 404
+                )) {
+                    currentProduct.put("apiUrl", "");
+                    ProductStore.updateRuntime(this, currentProduct);
+                    mode = Mode.DISCOVERY;
+                    webView.loadUrl(currentProduct.optString("url"));
+                    return;
+                }
+
+                String detail = status > 0 ? "조회 실패 · HTTP " + status : "조회 실패";
+                markCurrentFailure(detail);
                 scheduleNextProduct();
                 return;
             }
@@ -216,11 +250,13 @@ public class MonitorService extends Service {
                 currentProduct.put("apiUrl", result.optString("apiUrl", ""));
                 currentProduct.put("channelUid", result.optString("channelUid", ""));
                 currentProduct.put("productNo", result.optString("productNo", ""));
-                if (!result.optString("title", "").isBlank()) currentProduct.put("title", result.optString("title"));
+                if (!result.optString("title", "").isBlank()) {
+                    currentProduct.put("title", result.optString("title"));
+                }
             }
 
             processSuccessfulSnapshot(currentProduct, result);
-            ProductStore.save(this, products);
+            ProductStore.updateRuntime(this, currentProduct);
             scheduleNextProduct();
         } catch (Exception error) {
             markCurrentFailure("결과 처리 실패");
@@ -231,7 +267,9 @@ public class MonitorService extends Service {
     private void processSuccessfulSnapshot(JSONObject product, JSONObject result) throws Exception {
         JSONArray selectedArray = product.optJSONArray("selectedIds");
         Set<String> selected = new HashSet<>();
-        if (selectedArray != null) for (int i = 0; i < selectedArray.length(); i++) selected.add(selectedArray.optString(i));
+        if (selectedArray != null) {
+            for (int i = 0; i < selectedArray.length(); i++) selected.add(selectedArray.optString(i));
+        }
         JSONObject configuredLabels = product.optJSONObject("selectedLabels");
         if (configuredLabels == null) configuredLabels = new JSONObject();
 
@@ -263,17 +301,16 @@ public class MonitorService extends Service {
         }
 
         String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date());
-        String productStatus = "정상 · 재고 " + availableCount + "/" + selected.size() + " · " + time;
         product.put("lastAvailability", previous);
-        product.put("lastStatus", productStatus);
+        product.put("lastStatus", "재고 " + availableCount + "/" + selected.size() + " · " + time);
         product.put("lastCheck", System.currentTimeMillis());
 
-        String globalStatus = "정상 · " + (currentIndex + 1) + "/" + products.length() + " 상품 · " + time;
+        int enabledCount = ProductStore.enabledCount(this);
         MonitorPrefs.prefs(this).edit()
-            .putString(MonitorPrefs.KEY_LAST_STATUS, globalStatus)
+            .putString(MonitorPrefs.KEY_LAST_STATUS, enabledCount + "개 감시 중")
             .putLong(MonitorPrefs.KEY_LAST_CHECK, System.currentTimeMillis())
             .apply();
-        updateOngoingNotification(product.optString("title", "상품") + " · " + productStatus);
+        updateOngoingNotification(enabledCount + "개 상품 감시 중");
 
         if (restocked.length() > 0) {
             notifyRestock(product.optString("title", "재입고"), product.optString("url", ""), restocked);
@@ -285,17 +322,25 @@ public class MonitorService extends Service {
             try {
                 currentProduct.put("lastStatus", message);
                 currentProduct.put("lastCheck", System.currentTimeMillis());
-                ProductStore.save(this, products);
+                ProductStore.updateRuntime(this, currentProduct);
             } catch (Exception ignored) {}
         }
         setStatus(message);
     }
 
     private void scheduleNextProduct() {
-        if (stopping || products.length() == 0) return;
+        if (stopping) return;
+        products = ProductStore.enabledList(this);
+        if (products.length() == 0) {
+            stopSelf();
+            return;
+        }
         currentIndex = (currentIndex + 1) % products.length();
         mode = Mode.DIRECT;
-        long spacing = Math.max(MIN_PRODUCT_SPACING_MS, MonitorPrefs.intervalSeconds(this) * 1000L / Math.max(1, products.length()));
+        long spacing = Math.max(
+            MIN_PRODUCT_SPACING_MS,
+            MonitorPrefs.intervalSeconds(this) * 1000L / Math.max(1, products.length())
+        );
         handler.postDelayed(this::checkCurrentProduct, spacing);
     }
 
@@ -332,12 +377,18 @@ public class MonitorService extends Service {
 
     private void createNotificationChannels() {
         NotificationManager manager = getSystemService(NotificationManager.class);
-        NotificationChannel monitor = new NotificationChannel(CHANNEL_MONITOR, "재입고 감시 상태", NotificationManager.IMPORTANCE_LOW);
-        monitor.setDescription("재입고 감시가 실행 중일 때 표시됩니다.");
+        NotificationChannel monitor = new NotificationChannel(
+            CHANNEL_MONITOR,
+            "재입고 감시 상태",
+            NotificationManager.IMPORTANCE_LOW
+        );
         manager.createNotificationChannel(monitor);
 
-        NotificationChannel alert = new NotificationChannel(CHANNEL_ALERT, "재입고 알림", NotificationManager.IMPORTANCE_HIGH);
-        alert.setDescription("선택한 옵션이 재입고되면 알려줍니다.");
+        NotificationChannel alert = new NotificationChannel(
+            CHANNEL_ALERT,
+            "재입고 알림",
+            NotificationManager.IMPORTANCE_HIGH
+        );
         alert.enableVibration(true);
         manager.createNotificationChannel(alert);
     }
@@ -345,25 +396,30 @@ public class MonitorService extends Service {
     private PendingIntent openAppIntent() {
         Intent intent = new Intent(this, MainActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
     }
 
     private Notification buildOngoingNotification(String text) {
-        Intent stopIntent = new Intent(this, MonitorService.class).setAction(ACTION_STOP);
-        PendingIntent stop = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
-            .setContentTitle("Keyboard Restock · 감시 중")
+            .setContentTitle("Keyboard Restock")
             .setContentText(text)
             .setContentIntent(openAppIntent())
-            .addAction(new Notification.Action.Builder(null, "감시 중지", stop).build())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build();
     }
 
     private void updateOngoingNotification(String text) {
-        getSystemService(NotificationManager.class).notify(NOTIFICATION_MONITOR, buildOngoingNotification(text));
+        getSystemService(NotificationManager.class).notify(
+            NOTIFICATION_MONITOR,
+            buildOngoingNotification(text)
+        );
     }
 
     private void notifyRestock(String title, String productUrl, JSONArray labels) {
@@ -394,7 +450,10 @@ public class MonitorService extends Service {
             .setDefaults(Notification.DEFAULT_ALL)
             .setCategory(Notification.CATEGORY_ALARM)
             .build();
-        getSystemService(NotificationManager.class).notify(42000 + Math.abs((title + text).hashCode() % 1000), notification);
+        getSystemService(NotificationManager.class).notify(
+            42000 + Math.abs((title + text).hashCode() % 1000),
+            notification
+        );
     }
 
     @Override
