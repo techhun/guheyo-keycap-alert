@@ -74,33 +74,12 @@ jobs:
           fi
           npm run system:health -- transition fast dcinside "$status" '기키갤 떴냐' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
 
-      - name: Check restock watchlist (Actions)
-        if: always()
-        env:
-          RESTOCK_DISCORD_WEBHOOK_URL: ${{ secrets.RESTOCK_DISCORD_WEBHOOK_URL }}
-          SYSTEM_DISCORD_WEBHOOK_URL: ${{ secrets.SYSTEM_DISCORD_WEBHOOK_URL }}
-        shell: bash
-        run: |
-          status=ok
-          if npm run check:restock; then
-            :
-          else
-            echo 'Restock watcher read failed once; retrying...'
-            if npm run check:restock; then
-              :
-            else
-              status=fail
-              echo 'Restock watcher is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
-            fi
-          fi
-          npm run system:health -- transition fast restock "$status" '재입고 감시 (Actions)' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
-
       - name: Persist fast watcher state
         if: always()
         shell: bash
         run: |
           changed_files=()
-          for file in guheyo-state.json dcinside-tteotnya-state.json restock-state.json system-health-fast.json; do
+          for file in guheyo-state.json dcinside-tteotnya-state.json system-health-fast.json; do
             if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
               changed_files+=("$file")
             fi
