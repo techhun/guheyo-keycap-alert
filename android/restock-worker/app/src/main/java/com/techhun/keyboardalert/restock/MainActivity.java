@@ -53,23 +53,20 @@ public class MainActivity extends Activity {
     private static final int RED = Color.rgb(240, 68, 82);
     private static final int RED_SOFT = Color.rgb(255, 240, 242);
     private static final int GREEN = Color.rgb(20, 180, 110);
+    private static final int GREEN_SOFT = Color.rgb(232, 249, 241);
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable statusRefresh = new Runnable() {
         @Override public void run() {
-            refreshStatus();
+            renderProducts();
             refreshSessionButton();
-            if (isRunning()) renderProducts();
             handler.postDelayed(this, 2000L);
         }
     };
 
     private LinearLayout productList;
-    private TextView statusTitle;
-    private TextView statusDetail;
     private TextView sessionButton;
     private TextView[] intervalChips;
-    private Button monitorButton;
     private WebView webView;
 
     private JSONArray latestOptions = new JSONArray();
@@ -79,6 +76,7 @@ public class MainActivity extends Activity {
     private String latestProductNo = "";
     private String pendingUrl = "";
     private String editingProductId = null;
+    private String pendingEnableProductId = null;
     private boolean autoInspect;
     private boolean loginLaunching;
     private int intervalSeconds = 30;
@@ -105,59 +103,41 @@ public class MainActivity extends Activity {
         topRow.setGravity(Gravity.CENTER_VERTICAL);
         content.addView(topRow, matchWrap());
 
-        LinearLayout titleGroup = new LinearLayout(this);
-        titleGroup.setOrientation(LinearLayout.VERTICAL);
-        topRow.addView(titleGroup, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        titleGroup.addView(text("KEYBOARD RESTOCK", 12, BLUE, Typeface.BOLD));
         TextView title = text("재입고 감시", 30, TEXT, Typeface.BOLD);
-        title.setPadding(0, dp(4), 0, 0);
-        titleGroup.addView(title);
+        topRow.addView(title, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
 
         sessionButton = text("로그인", 14, BLUE, Typeface.BOLD);
         sessionButton.setGravity(Gravity.CENTER);
-        sessionButton.setPadding(dp(16), dp(10), dp(16), dp(10));
+        sessionButton.setPadding(dp(15), dp(9), dp(15), dp(9));
         sessionButton.setOnClickListener(v -> handleSessionAction());
         topRow.addView(sessionButton);
         refreshSessionButton();
 
-        TextView sub = text("필요한 옵션만 골라두면 이 기기에서 직접 확인해요.", 14, SUB, Typeface.NORMAL);
-        sub.setPadding(0, dp(7), 0, dp(24));
-        content.addView(sub);
-
-        LinearLayout hero = surface(20, 18);
-        content.addView(hero, sectionParams());
-        hero.addView(text("현재 상태", 13, SUB, Typeface.NORMAL));
-        statusTitle = text("감시 중지", 24, TEXT, Typeface.BOLD);
-        statusTitle.setPadding(0, dp(5), 0, 0);
-        hero.addView(statusTitle);
-        statusDetail = text("상품을 추가하고 감시를 시작하세요.", 13, SUB, Typeface.NORMAL);
-        statusDetail.setPadding(0, dp(7), 0, 0);
-        hero.addView(statusDetail);
-
-        LinearLayout listHeader = new LinearLayout(this);
-        listHeader.setGravity(Gravity.CENTER_VERTICAL);
-        listHeader.setPadding(dp(2), dp(18), dp(2), dp(10));
-        content.addView(listHeader);
-        listHeader.addView(text("감시 상품", 19, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout addRow = new LinearLayout(this);
+        addRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        addRow.setPadding(0, dp(18), 0, dp(10));
+        content.addView(addRow, matchWrap());
         TextView add = text("+ 상품 추가", 15, BLUE, Typeface.BOLD);
         add.setPadding(dp(12), dp(8), 0, dp(8));
         add.setOnClickListener(v -> addProduct());
-        listHeader.addView(add);
+        addRow.addView(add);
 
         productList = new LinearLayout(this);
         productList.setOrientation(LinearLayout.VERTICAL);
         content.addView(productList);
 
-        sectionHeading(content, "감시 설정");
         LinearLayout settings = surface(20, 18);
-        content.addView(settings, sectionParams());
-        settings.addView(text("조회 주기", 13, SUB, Typeface.NORMAL));
-        TextView intervalHint = text("상품이 여러 개면 이 주기 안에서 요청을 나눠서 확인해요.", 12, SUB, Typeface.NORMAL);
-        intervalHint.setPadding(0, dp(4), 0, 0);
-        settings.addView(intervalHint);
+        LinearLayout.LayoutParams settingsParams = sectionParams();
+        settingsParams.topMargin = dp(10);
+        content.addView(settings, settingsParams);
+        settings.addView(text("조회 주기", 14, TEXT, Typeface.BOLD));
 
         LinearLayout intervalRow = new LinearLayout(this);
-        intervalRow.setPadding(0, dp(10), 0, 0);
+        intervalRow.setPadding(0, dp(12), 0, 0);
         settings.addView(intervalRow, matchWrap());
         intervalChips = new TextView[INTERVAL_VALUES.length];
         for (int i = 0; i < INTERVAL_VALUES.length; i++) {
@@ -165,21 +145,14 @@ public class MainActivity extends Activity {
             TextView chip = text(INTERVAL_LABELS[i], 14, SUB, Typeface.BOLD);
             chip.setGravity(Gravity.CENTER);
             chip.setOnClickListener(v -> {
-                if (isRunning()) return;
                 intervalSeconds = seconds;
+                MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, seconds).apply();
                 updateIntervalChips();
             });
             intervalChips[i] = chip;
             intervalRow.addView(chip, rowParams(1f, i == 0 ? 0 : 8));
         }
         updateIntervalChips();
-
-        monitorButton = primaryButton("감시 시작");
-        monitorButton.setOnClickListener(v -> {
-            if (isRunning()) stopMonitoring();
-            else startMonitoring();
-        });
-        settings.addView(monitorButton, topParams(16));
 
         webView = new WebView(this);
         configureWebView(webView);
@@ -201,7 +174,6 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         renderProducts();
-        refreshStatus();
     }
 
     private void handleSessionAction() {
@@ -226,11 +198,10 @@ public class MainActivity extends Activity {
     }
 
     private void addProduct() {
-        if (isRunning()) { toast("감시를 중지한 뒤 상품을 추가해주세요."); return; }
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("https://m.smartstore.naver.com/.../products/...");
+        input.setHint("SmartStore 상품 URL");
         input.setPadding(dp(12), dp(8), dp(12), dp(8));
         new AlertDialog.Builder(this)
             .setTitle("상품 추가")
@@ -241,7 +212,10 @@ public class MainActivity extends Activity {
     }
 
     private void editProduct(JSONObject product) {
-        if (isRunning()) { toast("감시를 중지한 뒤 수정해주세요."); return; }
+        if (product.optBoolean("enabled", false)) {
+            toast("감시를 중지한 뒤 옵션을 수정해주세요.");
+            return;
+        }
         loadProductForEdit(product.optString("url"), product.optString("id"));
     }
 
@@ -258,7 +232,6 @@ public class MainActivity extends Activity {
         latestProductNo = "";
         autoInspect = true;
         webView.loadUrl(url);
-        toast("상품 옵션을 불러오는 중이에요.");
     }
 
     private void inspectInventory() {
@@ -278,7 +251,7 @@ public class MainActivity extends Activity {
             if (!result.optBoolean("ok")) {
                 String error = result.optString("error", "UNKNOWN");
                 if ("PRODUCT_API_FAILED".equals(error) && !pendingUrl.isBlank()) launchLogin(pendingUrl);
-                else toast("옵션 조회에 실패했어요. 다시 시도해주세요.");
+                else toast("옵션 조회에 실패했어요.");
                 return;
             }
             latestTitle = result.optString("title", "SmartStore 상품");
@@ -311,8 +284,11 @@ public class MainActivity extends Activity {
         for (int i = 0; i < latestOptions.length(); i++) {
             JSONObject option = latestOptions.optJSONObject(i);
             String id = option == null ? "" : option.optString("id");
-            int stock = option == null || option.isNull("stockQuantity") ? -1 : option.optInt("stockQuantity", -1);
-            rows[i] = optionLabel(option) + "  ·  " + (stock > 0 ? stock + "개" : stock == 0 ? "품절" : "재고 ?");
+            int stock = option == null || option.isNull("stockQuantity")
+                ? -1
+                : option.optInt("stockQuantity", -1);
+            rows[i] = optionLabel(option) + "  ·  "
+                + (stock > 0 ? stock + "개" : stock == 0 ? "품절" : "재고 ?");
             checked[i] = saved.contains(id);
         }
 
@@ -354,7 +330,6 @@ public class MainActivity extends Activity {
             editingProductId = null;
             pendingUrl = "";
             renderProducts();
-            toast("감시 상품에 저장했어요.");
         } catch (Exception e) {
             toast("저장하지 못했어요.");
         }
@@ -366,10 +341,9 @@ public class MainActivity extends Activity {
         JSONArray products = ProductStore.list(this);
         if (products.length() == 0) {
             LinearLayout empty = surface(20, 18);
-            empty.addView(text("아직 감시할 상품이 없어요", 16, TEXT, Typeface.BOLD));
-            TextView s = text("오른쪽 위의 + 상품 추가에서 시작하세요.", 13, SUB, Typeface.NORMAL);
-            s.setPadding(0, dp(5), 0, 0);
-            empty.addView(s);
+            TextView value = text("감시할 상품이 없어요", 15, SUB, Typeface.NORMAL);
+            value.setGravity(Gravity.CENTER);
+            empty.addView(value);
             productList.addView(empty, sectionParams());
             return;
         }
@@ -377,9 +351,37 @@ public class MainActivity extends Activity {
         for (int i = 0; i < products.length(); i++) {
             JSONObject product = products.optJSONObject(i);
             if (product == null) continue;
+            boolean enabled = product.optBoolean("enabled", false);
+
             LinearLayout card = surface(20, 18);
             productList.addView(card, sectionParams());
-            card.addView(text(product.optString("title", "SmartStore 상품"), 17, TEXT, Typeface.BOLD));
+
+            LinearLayout titleRow = new LinearLayout(this);
+            titleRow.setGravity(Gravity.TOP);
+            card.addView(titleRow, matchWrap());
+
+            TextView name = text(product.optString("title", "SmartStore 상품"), 17, TEXT, Typeface.BOLD);
+            titleRow.addView(name, new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ));
+
+            TextView badge = text(enabled ? "감시 중" : "중지", 12, enabled ? GREEN : SUB, Typeface.BOLD);
+            badge.setGravity(Gravity.CENTER);
+            badge.setPadding(dp(10), dp(6), dp(10), dp(6));
+            badge.setBackground(roundRect(enabled ? GREEN_SOFT : FIELD, 12));
+            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            );
+            badgeParams.leftMargin = dp(8);
+            titleRow.addView(badge, badgeParams);
+
+            TextView delete = text("삭제", 12, RED, Typeface.BOLD);
+            delete.setPadding(dp(10), dp(6), 0, dp(6));
+            delete.setOnClickListener(v -> confirmDelete(product));
+            titleRow.addView(delete);
 
             Map<String, String> labels = labelMap(product.optJSONObject("selectedLabels"));
             String optionSummary;
@@ -387,34 +389,66 @@ public class MainActivity extends Activity {
             else if (labels.size() == 1) optionSummary = labels.values().iterator().next();
             else optionSummary = labels.values().iterator().next() + " 외 " + (labels.size() - 1) + "개";
             TextView options = text(optionSummary, 13, SUB, Typeface.NORMAL);
-            options.setPadding(0, dp(6), 0, 0);
+            options.setPadding(0, dp(7), 0, 0);
             card.addView(options);
 
-            String last = product.optString("lastStatus",
-                product.optString("apiUrl", "").isBlank() ? "첫 감시 때 빠른 조회 정보를 준비해요" : "대기 중");
-            TextView state = text(last, 12, SUB, Typeface.NORMAL);
-            state.setPadding(0, dp(7), 0, dp(12));
-            card.addView(state);
+            String last = product.optString("lastStatus", "");
+            if (enabled && !last.isBlank()) {
+                TextView state = text(last, 12, SUB, Typeface.NORMAL);
+                state.setPadding(0, dp(7), 0, 0);
+                card.addView(state);
+            }
 
             LinearLayout actions = new LinearLayout(this);
+            actions.setPadding(0, dp(14), 0, 0);
             card.addView(actions, matchWrap());
+
+            Button toggle = enabled
+                ? button("감시 중지", RED, RED_SOFT)
+                : button("감시 시작", Color.WHITE, BLUE);
+            toggle.setOnClickListener(v -> toggleProduct(product));
+            actions.addView(toggle, rowParams(1f, 0));
+
             Button edit = softButton("옵션 수정");
             edit.setOnClickListener(v -> editProduct(product));
-            actions.addView(edit, rowParams(1f, 0));
-            Button delete = softRedButton("삭제");
-            delete.setOnClickListener(v -> confirmDelete(product));
-            actions.addView(delete, rowParams(0.55f, 8));
+            actions.addView(edit, rowParams(1f, 8));
         }
     }
 
+    private void toggleProduct(JSONObject product) {
+        String id = product.optString("id", "");
+        if (id.isBlank()) return;
+        boolean enable = !product.optBoolean("enabled", false);
+
+        if (enable && !hasNaverSession()) {
+            pendingEnableProductId = id;
+            launchLogin(product.optString("url", SMARTSTORE_HOME));
+            return;
+        }
+
+        ProductStore.setEnabled(this, id, enable);
+        syncMonitorService();
+        renderProducts();
+    }
+
+    private void syncMonitorService() {
+        int enabled = ProductStore.enabledCount(this);
+        if (enabled <= 0) {
+            startService(new Intent(this, MonitorService.class).setAction(MonitorService.ACTION_STOP));
+            MonitorPrefs.setRunning(this, false);
+            return;
+        }
+        MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, intervalSeconds).apply();
+        if (!isRunning()) startForegroundService(new Intent(this, MonitorService.class));
+    }
+
     private void confirmDelete(JSONObject product) {
-        if (isRunning()) { toast("감시를 중지한 뒤 삭제해주세요."); return; }
         new AlertDialog.Builder(this)
-            .setTitle("상품 삭제")
-            .setMessage(product.optString("title") + "\n감시 목록에서 삭제할까요?")
+            .setTitle("삭제할까요?")
             .setNegativeButton("취소", null)
             .setPositiveButton("삭제", (d, w) -> {
                 ProductStore.remove(this, product.optString("id"));
+                syncMonitorService();
                 renderProducts();
             })
             .show();
@@ -444,25 +478,33 @@ public class MainActivity extends Activity {
         if (requestCode != REQUEST_LOGIN) return;
         loginLaunching = false;
         refreshSessionButton();
-        if (resultCode == RESULT_OK) {
-            toast("로그인됐어요.");
-            if (!pendingUrl.isBlank()) {
-                autoInspect = true;
-                webView.loadUrl(pendingUrl);
-            }
+        if (resultCode != RESULT_OK) {
+            pendingEnableProductId = null;
+            return;
+        }
+
+        if (pendingEnableProductId != null) {
+            ProductStore.setEnabled(this, pendingEnableProductId, true);
+            pendingEnableProductId = null;
+            syncMonitorService();
+            renderProducts();
+        }
+
+        if (!pendingUrl.isBlank()) {
+            autoInspect = true;
+            webView.loadUrl(pendingUrl);
         }
     }
 
     private void confirmClearLogin() {
-        if (isRunning()) {
-            toast("감시를 중지한 뒤 로그아웃해주세요.");
-            return;
-        }
         new AlertDialog.Builder(this)
-            .setTitle("로그아웃")
-            .setMessage("Keyboard Restock에 저장된 네이버 로그인만 지울까요?\nChrome이나 삼성 인터넷 로그인에는 영향이 없어요.")
+            .setTitle("로그아웃할까요?")
             .setNegativeButton("취소", null)
-            .setPositiveButton("로그아웃", (d, w) -> clearAppLogin())
+            .setPositiveButton("로그아웃", (d, w) -> {
+                ProductStore.disableAll(this);
+                syncMonitorService();
+                clearAppLogin();
+            })
             .show();
     }
 
@@ -478,47 +520,9 @@ public class MainActivity extends Activity {
             }
             runOnUiThread(() -> {
                 refreshSessionButton();
-                toast("로그아웃했어요.");
+                renderProducts();
             });
         });
-    }
-
-    private void startMonitoring() {
-        JSONArray products = ProductStore.list(this);
-        if (products.length() == 0) {
-            toast("감시할 상품을 먼저 추가해주세요.");
-            return;
-        }
-        MonitorPrefs.prefs(this).edit().putInt(MonitorPrefs.KEY_INTERVAL, intervalSeconds).apply();
-        MonitorPrefs.setRunning(this, true);
-        startForegroundService(new Intent(this, MonitorService.class));
-        refreshStatus();
-        toast(products.length() + "개 상품 감시를 시작했어요.");
-    }
-
-    private void stopMonitoring() {
-        startService(new Intent(this, MonitorService.class).setAction(MonitorService.ACTION_STOP));
-        MonitorPrefs.setRunning(this, false);
-        refreshStatus();
-        toast("감시를 중지했어요.");
-    }
-
-    private void refreshStatus() {
-        if (statusTitle == null || statusDetail == null || monitorButton == null) return;
-        boolean running = isRunning();
-        JSONArray products = ProductStore.list(this);
-        statusTitle.setText(running ? "감시 중" : "감시 중지");
-        statusTitle.setTextColor(running ? GREEN : TEXT);
-
-        String status = MonitorPrefs.prefs(this).getString(MonitorPrefs.KEY_LAST_STATUS,
-            running ? "감시 준비 중" : "대기 중");
-        statusDetail.setText(products.length() + "개 상품 · " + status);
-
-        monitorButton.setText(running ? "감시 중지" : "감시 시작");
-        monitorButton.setTextColor(running ? RED : Color.WHITE);
-        monitorButton.setBackground(roundRect(running ? RED_SOFT : BLUE, 12));
-        intervalSeconds = running ? MonitorPrefs.intervalSeconds(this) : intervalSeconds;
-        updateIntervalChips();
     }
 
     private boolean isRunning() {
@@ -531,7 +535,6 @@ public class MainActivity extends Activity {
             boolean selected = INTERVAL_VALUES[i] == intervalSeconds;
             intervalChips[i].setTextColor(selected ? BLUE : SUB);
             intervalChips[i].setBackground(roundRect(selected ? BLUE_SOFT : FIELD, 12));
-            intervalChips[i].setAlpha(isRunning() ? 0.5f : 1f);
         }
     }
 
@@ -625,22 +628,10 @@ public class MainActivity extends Activity {
         return params;
     }
 
-    private LinearLayout.LayoutParams topParams(int top) {
-        LinearLayout.LayoutParams params = matchWrap();
-        params.topMargin = dp(top);
-        return params;
-    }
-
     private LinearLayout.LayoutParams rowParams(float weight, int left) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(46), weight);
         params.leftMargin = dp(left);
         return params;
-    }
-
-    private void sectionHeading(LinearLayout parent, String value) {
-        TextView title = text(value, 19, TEXT, Typeface.BOLD);
-        title.setPadding(dp(2), dp(18), 0, dp(10));
-        parent.addView(title);
     }
 
     private Button button(String label, int textColor, int backgroundColor) {
@@ -660,16 +651,8 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private Button primaryButton(String label) {
-        return button(label, Color.WHITE, BLUE);
-    }
-
     private Button softButton(String label) {
         return button(label, TEXT, FIELD);
-    }
-
-    private Button softRedButton(String label) {
-        return button(label, RED, RED_SOFT);
     }
 
     private void requestNotificationPermissionIfNeeded() {
@@ -681,6 +664,9 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (ProductStore.enabledCount(this) > 0 && hasNaverSession() && !isRunning()) {
+            startForegroundService(new Intent(this, MonitorService.class));
+        }
         renderProducts();
         refreshSessionButton();
         handler.removeCallbacks(statusRefresh);
