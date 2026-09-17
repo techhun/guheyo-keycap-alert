@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -17,6 +18,7 @@ import android.widget.TextView;
 
 public class LoginActivity extends Activity {
     static final String EXTRA_TARGET_URL = "target_url";
+    private static final String SMARTSTORE_HOME = "https://m.smartstore.naver.com/";
 
     private WebView webView;
     private String targetUrl;
@@ -25,9 +27,7 @@ public class LoginActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         targetUrl = getIntent().getStringExtra(EXTRA_TARGET_URL);
-        if (targetUrl == null || targetUrl.isBlank()) {
-            targetUrl = "https://m.smartstore.naver.com/";
-        }
+        if (targetUrl == null || targetUrl.isBlank()) targetUrl = SMARTSTORE_HOME;
 
         Window window = getWindow();
         window.setStatusBarColor(Color.WHITE);
@@ -92,7 +92,8 @@ public class LoginActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
-                if (isProductUrl(url)) {
+                if (isLoginUrl(url)) return;
+                if (loginCompleted(url)) {
                     Intent result = new Intent();
                     result.putExtra(EXTRA_TARGET_URL, targetUrl);
                     setResult(RESULT_OK, result);
@@ -108,11 +109,23 @@ public class LoginActivity extends Activity {
 
         setContentView(root);
         root.requestApplyInsets();
-        webView.loadUrl(targetUrl);
+
+        String loginUrl = "https://nid.naver.com/nidlogin.login?url=" + Uri.encode(targetUrl);
+        webView.loadUrl(loginUrl);
+    }
+
+    private boolean loginCompleted(String url) {
+        if (url == null || !url.contains("smartstore.naver.com")) return false;
+        if (targetUrl.contains("/products/")) return isProductUrl(url);
+        return true;
     }
 
     private boolean isProductUrl(String url) {
         return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+    }
+
+    private boolean isLoginUrl(String url) {
+        return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login"));
     }
 
     private int dp(int value) {
