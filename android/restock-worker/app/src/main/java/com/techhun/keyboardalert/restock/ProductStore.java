@@ -28,10 +28,24 @@ final class ProductStore {
                 changed = true;
             }
             if (changed) save(context, products);
-            return products;
+            return enabledFirst(products);
         } catch (Exception ignored) {
             return new JSONArray();
         }
+    }
+
+    private static JSONArray enabledFirst(JSONArray products) {
+        JSONArray ordered = new JSONArray();
+        for (int pass = 0; pass < 2; pass++) {
+            boolean targetEnabled = pass == 0;
+            for (int i = 0; i < products.length(); i++) {
+                JSONObject product = products.optJSONObject(i);
+                if (product != null && product.optBoolean("enabled", false) == targetEnabled) {
+                    ordered.put(product);
+                }
+            }
+        }
+        return ordered;
     }
 
     static JSONArray enabledList(Context context) {
