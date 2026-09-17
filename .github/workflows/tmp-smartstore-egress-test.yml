@@ -1,0 +1,90 @@
+name: Temporary SmartStore egress test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-smartstore-egress-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Probe SmartStore endpoints
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/probe.mjs" <<'EOF'
+          const targets = [
+            ['swag-desktop', 'https://smartstore.naver.com/swagkey/products/12348949592'],
+            ['swag-mobile', 'https://m.smartstore.naver.com/swagkey/products/12348949592'],
+            ['geon-desktop', 'https://smartstore.naver.com/geonlab/products/13233558774'],
+            ['geon-mobile', 'https://m.smartstore.naver.com/geonlab/products/13233558774'],
+            ['short-link', 'https://naver.me/xiLfDSsP']
+          ];
+
+          for (const [name, url] of targets) {
+            try {
+              const res = await fetch(url, {
+                redirect: 'follow',
+                headers: {
+                  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                  'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                  'cache-control': 'no-cache',
+                  'pragma': 'no-cache'
+                }
+              });
+              const text = await res.text();
+              const title = (text.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || '').trim().replace(/\s+/g, ' ');
+              console.log(JSON.stringify({
+                os: process.platform,
+                name,
+                status: res.status,
+                finalUrl: res.url,
+                server: res.headers.get('server'),
+                len: text.length,
+                title: title.slice(0, 120),
+                blocked: /429|too many requests|비정상|접속.{0,10}제한|요청.{0,10}많/i.test(text.slice(0, 3000))
+              }));
+            } catch (error) {
+              console.log(JSON.stringify({ os: process.platform, name, error: String(error?.stack || error) }));
+            }
+          }
+          EOF
+          node "$RUNNER_TEMP/probe.mjs"
+
+  cleanup:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/tmp-smartstore-egress-test.yml
+          git commit -m 'Remove temporary SmartStore egress test [skip ci]'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
