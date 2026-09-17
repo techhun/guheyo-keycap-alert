@@ -82,7 +82,7 @@ public class MonitorService extends Service {
 
         MonitorPrefs.setRunning(this, true);
         acquireWakeLock();
-        startForeground(NOTIFICATION_MONITOR, buildOngoingNotification(products.length() + "개 상품 감시 중"));
+        startForeground(NOTIFICATION_MONITOR, buildOngoingNotification(products.length() + "개 알림 켜짐"));
         ensureWebView();
 
         if (!bootstrapReady) {
@@ -226,7 +226,6 @@ public class MonitorService extends Service {
                     return;
                 }
 
-                // 저장된 빠른 API가 더 이상 유효하지 않으면 이 상품만 다시 탐색한다.
                 if (mode == Mode.DIRECT && (
                     "PRODUCT_API_FAILED".equals(error)
                         || "API_URL_MISSING".equals(error)
@@ -302,15 +301,15 @@ public class MonitorService extends Service {
 
         String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date());
         product.put("lastAvailability", previous);
-        product.put("lastStatus", "재고 " + availableCount + "/" + selected.size() + " · " + time);
+        product.put("lastStatus", "재고 있음 " + availableCount + "/" + selected.size() + " · " + time);
         product.put("lastCheck", System.currentTimeMillis());
 
         int enabledCount = ProductStore.enabledCount(this);
         MonitorPrefs.prefs(this).edit()
-            .putString(MonitorPrefs.KEY_LAST_STATUS, enabledCount + "개 감시 중")
+            .putString(MonitorPrefs.KEY_LAST_STATUS, enabledCount + "개 알림 켜짐")
             .putLong(MonitorPrefs.KEY_LAST_CHECK, System.currentTimeMillis())
             .apply();
-        updateOngoingNotification(enabledCount + "개 상품 감시 중");
+        updateOngoingNotification(enabledCount + "개 알림 켜짐");
 
         if (restocked.length() > 0) {
             notifyRestock(product.optString("title", "재입고"), product.optString("url", ""), restocked);
@@ -379,7 +378,7 @@ public class MonitorService extends Service {
         NotificationManager manager = getSystemService(NotificationManager.class);
         NotificationChannel monitor = new NotificationChannel(
             CHANNEL_MONITOR,
-            "재입고 감시 상태",
+            "재입고 알림 상태",
             NotificationManager.IMPORTANCE_LOW
         );
         manager.createNotificationChannel(monitor);
