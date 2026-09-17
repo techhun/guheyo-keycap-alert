@@ -1,15 +1,15 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-17T17:20:45.765Z",
+  "updatedAt": "2026-09-17T18:31:55.460Z",
   "sources": {
     "geonworks-gb": {
       "status": "ok",
       "changedAt": "2026-09-17T11:30:44.545Z"
     },
     "geonworks-release": {
-      "status": "ok",
-      "changedAt": "2026-09-17T17:20:45.765Z"
+      "status": "fail",
+      "changedAt": "2026-09-17T18:31:55.460Z"
     },
     "prototypist": {
       "status": "ok",
