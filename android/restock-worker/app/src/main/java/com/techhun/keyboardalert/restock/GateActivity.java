@@ -126,7 +126,7 @@ public class GateActivity extends Activity {
     }
 
     private void openMain() {
-        Intent intent = new Intent(this, MainActivity.class);
+        Intent intent = new Intent(this, RestockActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(intent);
         finish();
