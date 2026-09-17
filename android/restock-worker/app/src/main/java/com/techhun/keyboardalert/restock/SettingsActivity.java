@@ -42,6 +42,7 @@ public class SettingsActivity extends Activity {
 
     private TextView[] chips;
     private TextView notificationStatus;
+    private TextView batteryStatus;
     private int interval;
 
     @Override
