@@ -6,12 +6,16 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.view.Gravity;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -29,10 +33,13 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -40,6 +47,15 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_URL = "https://m.smartstore.naver.com/swagkey/products/12348949592";
     private static final int[] INTERVAL_VALUES = {15, 30, 60};
     private static final String[] INTERVAL_LABELS = {"15초", "30초", "60초"};
+
+    private static final int COLOR_BG = Color.rgb(246, 247, 249);
+    private static final int COLOR_CARD = Color.WHITE;
+    private static final int COLOR_BORDER = Color.rgb(226, 229, 234);
+    private static final int COLOR_TEXT = Color.rgb(30, 34, 40);
+    private static final int COLOR_SUB = Color.rgb(101, 108, 118);
+    private static final int COLOR_PRIMARY = Color.rgb(31, 126, 83);
+    private static final int COLOR_DANGER = Color.rgb(180, 62, 62);
+    private static final int COLOR_NEUTRAL = Color.rgb(92, 99, 108);
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable statusRefresh = new Runnable() {
@@ -53,16 +69,24 @@ public class MainActivity extends Activity {
     private WebView webView;
     private EditText urlInput;
     private TextView statusText;
+    private TextView productTitleText;
+    private TextView productMetaText;
     private TextView resultText;
     private TextView selectedText;
     private TextView monitorStatusText;
+    private TextView lastCheckText;
     private Button inspectButton;
     private Button selectButton;
+    private Button detailsButton;
+    private Button browserToggleButton;
     private Button startButton;
     private Button stopButton;
     private Spinner intervalSpinner;
+
     private JSONArray latestOptions = new JSONArray();
     private String latestTitle = "";
+    private boolean browserVisible = false;
+    private boolean autoInspectPending = false;
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -73,55 +97,115 @@ public class MainActivity extends Activity {
 
         var prefs = MonitorPrefs.prefs(this);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(12), dp(10), dp(12), dp(10));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(COLOR_BG);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(16), dp(16), dp(28));
+        scroll.addView(content, new ScrollView.LayoutParams(
+            ScrollView.LayoutParams.MATCH_PARENT,
+            ScrollView.LayoutParams.WRAP_CONTENT
+        ));
 
         TextView heading = new TextView(this);
         heading.setText("Keyboard Restock");
-        heading.setTextSize(22f);
-        heading.setTextColor(Color.BLACK);
-        heading.setPadding(0, 0, 0, dp(6));
-        root.addView(heading);
+        heading.setTextSize(25f);
+        heading.setTextColor(COLOR_TEXT);
+        heading.setTypeface(null, android.graphics.Typeface.BOLD);
+        content.addView(heading);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("SmartStore 옵션 재입고를 기기에서 직접 감시합니다.");
+        subtitle.setTextSize(13f);
+        subtitle.setTextColor(COLOR_SUB);
+        subtitle.setPadding(0, dp(2), 0, dp(14));
+        content.addView(subtitle);
+
+        LinearLayout productCard = card();
+        content.addView(productCard, cardParams());
+
+        TextView productSection = sectionTitle("상품");
+        productCard.addView(productSection);
 
         urlInput = new EditText(this);
         urlInput.setSingleLine(true);
+        urlInput.setTextSize(14f);
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         urlInput.setText(prefs.getString(MonitorPrefs.KEY_URL, DEFAULT_URL));
-        root.addView(urlInput, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
+        urlInput.setHint("SmartStore 상품 URL");
+        productCard.addView(urlInput, matchWrap());
 
-        LinearLayout browserButtons = new LinearLayout(this);
-        browserButtons.setOrientation(LinearLayout.HORIZONTAL);
+        Button loadButton = button("상품 불러오기", COLOR_PRIMARY);
+        loadButton.setOnClickListener(v -> openProduct());
+        productCard.addView(loadButton, matchWrapTop(8));
 
-        Button openButton = new Button(this);
-        openButton.setText("상품 열기");
-        openButton.setOnClickListener(v -> openProduct());
-        browserButtons.addView(openButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        productTitleText = new TextView(this);
+        productTitleText.setText(prefs.getString(MonitorPrefs.KEY_TITLE, "상품을 불러오세요"));
+        productTitleText.setTextColor(COLOR_TEXT);
+        productTitleText.setTextSize(17f);
+        productTitleText.setTypeface(null, android.graphics.Typeface.BOLD);
+        productTitleText.setPadding(0, dp(14), 0, dp(2));
+        productCard.addView(productTitleText);
 
-        inspectButton = new Button(this);
-        inspectButton.setText("옵션 불러오기");
-        inspectButton.setEnabled(false);
-        inspectButton.setOnClickListener(v -> inspectInventory());
-        browserButtons.addView(inspectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(browserButtons);
+        productMetaText = new TextView(this);
+        productMetaText.setText("옵션 재고를 불러오면 요약이 표시됩니다.");
+        productMetaText.setTextColor(COLOR_SUB);
+        productMetaText.setTextSize(13f);
+        productCard.addView(productMetaText);
 
         statusText = new TextView(this);
         statusText.setText("대기 중");
-        statusText.setTextColor(Color.DKGRAY);
-        statusText.setPadding(0, dp(3), 0, dp(5));
-        root.addView(statusText);
+        statusText.setTextColor(COLOR_SUB);
+        statusText.setTextSize(12f);
+        statusText.setPadding(0, dp(6), 0, 0);
+        productCard.addView(statusText);
 
-        LinearLayout controlRow = new LinearLayout(this);
-        controlRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout productActions = new LinearLayout(this);
+        productActions.setOrientation(LinearLayout.HORIZONTAL);
+        productActions.setPadding(0, dp(10), 0, 0);
+        productCard.addView(productActions, matchWrap());
 
-        selectButton = new Button(this);
-        selectButton.setText("감시 옵션 선택");
+        inspectButton = button("옵션 새로고침", COLOR_NEUTRAL);
+        inspectButton.setEnabled(false);
+        inspectButton.setOnClickListener(v -> inspectInventory());
+        productActions.addView(inspectButton, rowButtonParams(1f, 0));
+
+        detailsButton = button("전체 옵션 보기", COLOR_NEUTRAL);
+        detailsButton.setEnabled(false);
+        detailsButton.setOnClickListener(v -> showAllOptions());
+        productActions.addView(detailsButton, rowButtonParams(1f, 8));
+
+        browserToggleButton = button("브라우저 보기", COLOR_NEUTRAL);
+        browserToggleButton.setOnClickListener(v -> setBrowserVisible(!browserVisible));
+        productCard.addView(browserToggleButton, matchWrapTop(8));
+
+        LinearLayout monitorCard = card();
+        content.addView(monitorCard, cardParams());
+        monitorCard.addView(sectionTitle("감시 설정"));
+
+        selectButton = button("감시 옵션 선택", COLOR_PRIMARY);
         selectButton.setEnabled(false);
         selectButton.setOnClickListener(v -> chooseOptions());
-        controlRow.addView(selectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f));
+        monitorCard.addView(selectButton, matchWrap());
+
+        selectedText = new TextView(this);
+        selectedText.setTextColor(COLOR_TEXT);
+        selectedText.setTextSize(14f);
+        selectedText.setPadding(0, dp(10), 0, dp(8));
+        monitorCard.addView(selectedText);
+
+        LinearLayout intervalRow = new LinearLayout(this);
+        intervalRow.setOrientation(LinearLayout.HORIZONTAL);
+        intervalRow.setGravity(Gravity.CENTER_VERTICAL);
+        monitorCard.addView(intervalRow, matchWrap());
+
+        TextView intervalLabel = new TextView(this);
+        intervalLabel.setText("조회 주기");
+        intervalLabel.setTextColor(COLOR_SUB);
+        intervalLabel.setTextSize(14f);
+        intervalRow.addView(intervalLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         intervalSpinner = new Spinner(this);
         ArrayAdapter<String> intervalAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, INTERVAL_LABELS);
@@ -131,31 +215,54 @@ public class MainActivity extends Activity {
         for (int i = 0; i < INTERVAL_VALUES.length; i++) {
             if (INTERVAL_VALUES[i] == savedInterval) intervalSpinner.setSelection(i);
         }
-        controlRow.addView(intervalSpinner, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(controlRow);
-
-        selectedText = new TextView(this);
-        selectedText.setTextColor(Color.DKGRAY);
-        selectedText.setPadding(dp(4), dp(4), dp(4), dp(6));
-        root.addView(selectedText);
+        intervalRow.addView(intervalSpinner, new LinearLayout.LayoutParams(dp(120), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         LinearLayout monitorButtons = new LinearLayout(this);
         monitorButtons.setOrientation(LinearLayout.HORIZONTAL);
+        monitorButtons.setPadding(0, dp(10), 0, 0);
+        monitorCard.addView(monitorButtons, matchWrap());
 
-        startButton = new Button(this);
-        startButton.setText("감시 시작");
+        startButton = button("감시 시작", COLOR_PRIMARY);
         startButton.setOnClickListener(v -> startMonitoring());
-        monitorButtons.addView(startButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        monitorButtons.addView(startButton, rowButtonParams(1f, 0));
 
-        stopButton = new Button(this);
-        stopButton.setText("감시 중지");
+        stopButton = button("감시 중지", COLOR_DANGER);
         stopButton.setOnClickListener(v -> stopMonitoring());
-        monitorButtons.addView(stopButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(monitorButtons);
+        monitorButtons.addView(stopButton, rowButtonParams(1f, 8));
+
+        LinearLayout stateCard = card();
+        content.addView(stateCard, cardParams());
+        stateCard.addView(sectionTitle("현재 상태"));
 
         monitorStatusText = new TextView(this);
-        monitorStatusText.setPadding(dp(4), dp(4), dp(4), dp(6));
-        root.addView(monitorStatusText);
+        monitorStatusText.setTextSize(16f);
+        monitorStatusText.setTypeface(null, android.graphics.Typeface.BOLD);
+        stateCard.addView(monitorStatusText);
+
+        lastCheckText = new TextView(this);
+        lastCheckText.setTextColor(COLOR_SUB);
+        lastCheckText.setTextSize(13f);
+        lastCheckText.setPadding(0, dp(5), 0, 0);
+        stateCard.addView(lastCheckText);
+
+        resultText = new TextView(this);
+        resultText.setTextColor(COLOR_SUB);
+        resultText.setTextSize(13f);
+        resultText.setPadding(0, dp(8), 0, 0);
+        resultText.setText("상품을 불러오면 현재 옵션 재고가 여기에 요약됩니다.");
+        stateCard.addView(resultText);
+
+        LinearLayout browserCard = card();
+        content.addView(browserCard, cardParams());
+        TextView browserTitle = sectionTitle("SmartStore 브라우저");
+        browserCard.addView(browserTitle);
+
+        TextView browserHint = new TextView(this);
+        browserHint.setText("로그인이 필요하거나 상품 페이지를 직접 확인할 때만 펼쳐서 사용하세요.");
+        browserHint.setTextColor(COLOR_SUB);
+        browserHint.setTextSize(12f);
+        browserHint.setPadding(0, 0, 0, dp(6));
+        browserCard.addView(browserHint);
 
         webView = new WebView(this);
         configureWebView(webView);
@@ -164,40 +271,39 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 inspectButton.setEnabled(false);
-                statusText.setText("로딩 중 · " + url);
+                statusText.setText("상품 페이지 로딩 중…");
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                boolean productPage = url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+                boolean productPage = isProductUrl(url);
                 inspectButton.setEnabled(productPage);
-                if (url != null && url.contains("nid.naver.com")) {
-                    statusText.setText("네이버 로그인이 필요합니다. 로그인 후 상품 페이지로 돌아오세요.");
+                if (isLoginUrl(url)) {
+                    statusText.setText("네이버 로그인이 필요합니다.");
+                    setBrowserVisible(true);
+                    Toast.makeText(MainActivity.this, "브라우저에서 네이버 로그인 후 상품 페이지로 돌아오세요.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                if (productPage) {
+                    statusText.setText("상품 페이지 연결 완료");
+                    if (autoInspectPending) {
+                        autoInspectPending = false;
+                        uiHandler.postDelayed(() -> {
+                            if (isProductUrl(webView.getUrl())) inspectInventory();
+                        }, 900L);
+                    }
                 } else {
-                    statusText.setText("로드 완료 · " + view.getTitle() + "\n" + url);
+                    statusText.setText("페이지 로드 완료");
                 }
             }
         });
-
-        root.addView(webView, new LinearLayout.LayoutParams(
+        browserCard.addView(webView, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            0,
-            1f
+            dp(1)
         ));
 
-        ScrollView resultScroll = new ScrollView(this);
-        resultText = new TextView(this);
-        resultText.setTextIsSelectable(true);
-        resultText.setTextSize(12f);
-        resultText.setPadding(dp(4), dp(6), dp(4), dp(6));
-        resultText.setText("상품 페이지가 열린 뒤 '옵션 불러오기'를 누르세요.");
-        resultScroll.addView(resultText);
-        root.addView(resultScroll, new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(170)
-        ));
-
-        setContentView(root);
+        setContentView(scroll);
         refreshSelectedSummary();
         refreshMonitorUi();
         openProduct();
@@ -219,8 +325,85 @@ public class MainActivity extends Activity {
         cookies.setAcceptThirdPartyCookies(view, true);
     }
 
+    private boolean isProductUrl(String url) {
+        return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+    }
+
+    private boolean isLoginUrl(String url) {
+        return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login"));
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private LinearLayout card() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(14), dp(14), dp(14), dp(14));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(COLOR_CARD);
+        background.setCornerRadius(dp(14));
+        background.setStroke(dp(1), COLOR_BORDER);
+        layout.setBackground(background);
+        return layout;
+    }
+
+    private LinearLayout.LayoutParams cardParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.bottomMargin = dp(12);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+    }
+
+    private LinearLayout.LayoutParams matchWrapTop(int topDp) {
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = dp(topDp);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams rowButtonParams(float weight, int leftDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, weight);
+        params.leftMargin = dp(leftDp);
+        return params;
+    }
+
+    private TextView sectionTitle(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextColor(COLOR_SUB);
+        view.setTextSize(12f);
+        view.setTypeface(null, android.graphics.Typeface.BOLD);
+        view.setPadding(0, 0, 0, dp(8));
+        return view;
+    }
+
+    private Button button(String text, int color) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(14f);
+        button.setAllCaps(false);
+        button.setTextColor(Color.WHITE);
+        button.setBackgroundTintList(ColorStateList.valueOf(color));
+        button.setMinHeight(dp(46));
+        return button;
+    }
+
+    private void setBrowserVisible(boolean visible) {
+        browserVisible = visible;
+        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) webView.getLayoutParams();
+        params.height = dp(visible ? 360 : 1);
+        webView.setLayoutParams(params);
+        browserToggleButton.setText(visible ? "브라우저 숨기기" : "브라우저 보기");
     }
 
     private void requestNotificationPermissionIfNeeded() {
@@ -232,20 +415,26 @@ public class MainActivity extends Activity {
     private void openProduct() {
         String url = urlInput.getText().toString().trim();
         if (!url.startsWith("https://")) {
-            resultText.setText("https:// SmartStore URL을 입력하세요.");
+            Toast.makeText(this, "https:// SmartStore 상품 URL을 입력하세요.", Toast.LENGTH_LONG).show();
             return;
         }
         inspectButton.setEnabled(false);
         selectButton.setEnabled(false);
+        detailsButton.setEnabled(false);
         latestOptions = new JSONArray();
-        resultText.setText("페이지 로딩 중...");
+        autoInspectPending = true;
+        productMetaText.setText("상품 페이지를 불러오는 중입니다…");
+        resultText.setText("상품 연결 중…");
         webView.loadUrl(url);
     }
 
     private void inspectInventory() {
+        if (!isProductUrl(webView.getUrl())) {
+            Toast.makeText(this, "SmartStore 상품 페이지가 먼저 열려야 합니다.", Toast.LENGTH_SHORT).show();
+            return;
+        }
         inspectButton.setEnabled(false);
-        statusText.setText("상품 API 확인 중...");
-        resultText.setText("페이지 내부에서 옵션 재고를 조회하고 있습니다...");
+        statusText.setText("옵션 재고 확인 중…");
         webView.evaluateJavascript(InventoryScript.SCRIPT, ignored -> {});
     }
 
@@ -263,8 +452,11 @@ public class MainActivity extends Activity {
             if (!result.optBoolean("ok", false)) {
                 latestOptions = new JSONArray();
                 selectButton.setEnabled(false);
-                statusText.setText("옵션 조회 실패 · " + result.optString("error", "UNKNOWN"));
-                resultText.setText(result.toString(2));
+                detailsButton.setEnabled(false);
+                String error = result.optString("error", "UNKNOWN");
+                statusText.setText("옵션 조회 실패 · " + error);
+                productMetaText.setText("옵션 재고를 읽지 못했습니다.");
+                resultText.setText("조회 실패: " + error + "\n브라우저 보기에서 상품 페이지 상태를 확인해보세요.");
                 return;
             }
 
@@ -272,17 +464,66 @@ public class MainActivity extends Activity {
             latestOptions = result.optJSONArray("options");
             if (latestOptions == null) latestOptions = new JSONArray();
             selectButton.setEnabled(latestOptions.length() > 0);
-            statusText.setText("옵션 조회 성공 · " + latestOptions.length() + "개");
-            resultText.setText(formatInventory(result));
+            detailsButton.setEnabled(latestOptions.length() > 0);
+
+            int availableOptions = 0;
+            int soldOutOptions = 0;
+            for (int i = 0; i < latestOptions.length(); i++) {
+                JSONObject option = latestOptions.optJSONObject(i);
+                if (option == null) continue;
+                if (option.optBoolean("available", false)) availableOptions++;
+                else soldOutOptions++;
+            }
+
+            productTitleText.setText(latestTitle);
+            Object totalStock = result.opt("stockQuantity");
+            String totalStockText = (totalStock == null || totalStock == JSONObject.NULL) ? "?" : String.valueOf(totalStock);
+            productMetaText.setText("옵션 " + latestOptions.length() + "개 · 재고 있음 " + availableOptions + " · 품절 " + soldOutOptions + " · 총 재고 " + totalStockText);
+            statusText.setText("옵션 재고 업데이트 완료");
+            resultText.setText(formatInventorySummary(result));
+            pruneInvalidSavedSelections();
         } catch (Exception error) {
-            statusText.setText("결과 파싱 실패");
-            resultText.setText("raw:\n" + json + "\n\nerror:\n" + error);
+            statusText.setText("결과 처리 실패");
+            resultText.setText("결과를 처리하지 못했습니다: " + error.getClass().getSimpleName());
         }
+    }
+
+    private void pruneInvalidSavedSelections() {
+        var prefs = MonitorPrefs.prefs(this);
+        String configuredUrl = prefs.getString(MonitorPrefs.KEY_URL, "");
+        String currentUrl = urlInput.getText().toString().trim();
+        if (!configuredUrl.equals(currentUrl)) return;
+        if (prefs.getBoolean(MonitorPrefs.KEY_RUNNING, false)) return;
+
+        Set<String> validIds = new HashSet<>();
+        Map<String, String> validLabels = new LinkedHashMap<>();
+        for (int i = 0; i < latestOptions.length(); i++) {
+            JSONObject option = latestOptions.optJSONObject(i);
+            if (option == null) continue;
+            String id = option.optString("id", "");
+            if (id.isBlank()) continue;
+            validIds.add(id);
+            validLabels.put(id, optionLabel(option));
+        }
+
+        List<String> savedIds = MonitorPrefs.selectedIds(this);
+        if (savedIds.isEmpty()) return;
+        List<String> retained = new ArrayList<>();
+        Map<String, String> retainedLabels = new LinkedHashMap<>();
+        for (String id : savedIds) {
+            if (!validIds.contains(id)) continue;
+            retained.add(id);
+            retainedLabels.put(id, validLabels.getOrDefault(id, id));
+        }
+        if (retained.size() == savedIds.size()) return;
+
+        MonitorPrefs.saveConfig(this, currentUrl, latestTitle, retained, retainedLabels, selectedIntervalSeconds());
+        refreshSelectedSummary();
     }
 
     private void chooseOptions() {
         if (latestOptions.length() == 0) {
-            Toast.makeText(this, "먼저 옵션을 불러오세요.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "먼저 상품 옵션을 불러오세요.", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -294,7 +535,8 @@ public class MainActivity extends Activity {
             String id = option == null ? "" : option.optString("id", "");
             String label = option == null ? "옵션" : optionLabel(option);
             int stock = option == null || option.isNull("stockQuantity") ? -1 : option.optInt("stockQuantity", -1);
-            labels[i] = label + (stock >= 0 ? " · 현재 " + stock + "개" : "");
+            String stockText = stock < 0 ? "재고 ?" : (stock > 0 ? "재고 " + stock + "개" : "품절");
+            labels[i] = label + "  ·  " + stockText;
             checked[i] = saved.contains(id);
         }
 
@@ -327,8 +569,27 @@ public class MainActivity extends Activity {
                     selectedIntervalSeconds()
                 );
                 refreshSelectedSummary();
-                Toast.makeText(this, ids.size() + "개 옵션을 저장했습니다.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, ids.size() + "개 옵션을 감시 대상으로 저장했습니다.", Toast.LENGTH_SHORT).show();
             })
+            .show();
+    }
+
+    private void showAllOptions() {
+        if (latestOptions.length() == 0) return;
+        String[] rows = new String[latestOptions.length()];
+        for (int i = 0; i < latestOptions.length(); i++) {
+            JSONObject option = latestOptions.optJSONObject(i);
+            if (option == null) {
+                rows[i] = "옵션";
+                continue;
+            }
+            int stock = option.isNull("stockQuantity") ? -1 : option.optInt("stockQuantity", -1);
+            rows[i] = (stock > 0 ? "● " : "○ ") + optionLabel(option) + "  ·  " + (stock < 0 ? "?" : stock + "개");
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("전체 옵션 재고")
+            .setItems(rows, null)
+            .setPositiveButton("닫기", null)
             .show();
     }
 
@@ -341,14 +602,14 @@ public class MainActivity extends Activity {
     private void startMonitoring() {
         List<String> ids = MonitorPrefs.selectedIds(this);
         if (ids.isEmpty()) {
-            Toast.makeText(this, "옵션을 불러온 뒤 감시할 옵션을 선택하세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "감시할 옵션을 먼저 선택하세요.", Toast.LENGTH_LONG).show();
             return;
         }
 
         String configuredUrl = MonitorPrefs.prefs(this).getString(MonitorPrefs.KEY_URL, "");
         String currentUrl = urlInput.getText().toString().trim();
         if (!configuredUrl.equals(currentUrl)) {
-            Toast.makeText(this, "URL이 바뀌었습니다. 옵션을 다시 불러와 선택하세요.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "상품 URL이 바뀌었습니다. 상품을 다시 불러오고 옵션을 선택하세요.", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -359,7 +620,7 @@ public class MainActivity extends Activity {
         startForegroundService(service);
         MonitorPrefs.setRunning(this, true);
         refreshMonitorUi();
-        Toast.makeText(this, "재입고 감시를 시작했습니다.", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, selectedIntervalSeconds() + "초 간격 재입고 감시를 시작했습니다.", Toast.LENGTH_SHORT).show();
     }
 
     private void stopMonitoring() {
@@ -373,10 +634,10 @@ public class MainActivity extends Activity {
     private void refreshSelectedSummary() {
         Map<String, String> labels = MonitorPrefs.selectedLabels(this);
         if (labels.isEmpty()) {
-            selectedText.setText("감시 옵션: 아직 선택하지 않음");
+            selectedText.setText("선택된 옵션이 없습니다.");
             return;
         }
-        StringBuilder summary = new StringBuilder("감시 옵션 ").append(labels.size()).append("개\n");
+        StringBuilder summary = new StringBuilder();
         int count = 0;
         for (String label : labels.values()) {
             if (count++ >= 4) {
@@ -391,34 +652,36 @@ public class MainActivity extends Activity {
     private void refreshMonitorUi() {
         var prefs = MonitorPrefs.prefs(this);
         boolean running = prefs.getBoolean(MonitorPrefs.KEY_RUNNING, false);
-        String status = prefs.getString(MonitorPrefs.KEY_LAST_STATUS, running ? "감시 시작 중" : "대기 중");
+        String status = prefs.getString(MonitorPrefs.KEY_LAST_STATUS, running ? "감시 준비 중" : "대기 중");
+        long lastCheck = prefs.getLong(MonitorPrefs.KEY_LAST_CHECK, 0L);
+
         startButton.setEnabled(!running);
         stopButton.setEnabled(running);
-        monitorStatusText.setText((running ? "🟢 감시 중" : "⚪ 감시 중지") + " · " + status);
+        intervalSpinner.setEnabled(!running);
+        monitorStatusText.setText((running ? "● 감시 중" : "○ 감시 중지") + "  ·  " + status);
+        monitorStatusText.setTextColor(running ? COLOR_PRIMARY : COLOR_NEUTRAL);
+
+        if (lastCheck > 0L) {
+            String time = new SimpleDateFormat("MM/dd HH:mm:ss", Locale.KOREA).format(new Date(lastCheck));
+            lastCheckText.setText("마지막 상태 갱신  " + time + (running ? "  ·  " + MonitorPrefs.intervalSeconds(this) + "초 간격" : ""));
+        } else {
+            lastCheckText.setText(running ? "첫 재고 확인을 기다리는 중입니다." : "감시를 시작하면 최근 조회 상태가 표시됩니다.");
+        }
     }
 
-    private String formatInventory(JSONObject result) {
-        StringBuilder output = new StringBuilder();
-        output.append(result.optString("title", "상품")).append('\n');
-        output.append("상품 재고: ").append(result.opt("stockQuantity")).append('\n');
-        output.append("옵션 조합: ").append(result.optInt("optionCombinationCount", 0)).append("개\n\n");
-
+    private String formatInventorySummary(JSONObject result) {
         JSONArray options = result.optJSONArray("options");
-        if (options == null || options.length() == 0) {
-            output.append("옵션 조합 데이터 없음\n");
-        } else {
-            for (int i = 0; i < options.length(); i++) {
-                JSONObject option = options.optJSONObject(i);
-                if (option == null) continue;
-                output.append(option.optBoolean("available", false) ? "[재고] " : "[품절] ")
-                    .append(optionLabel(option))
-                    .append(" · 수량 ")
-                    .append(option.isNull("stockQuantity") ? "?" : option.optInt("stockQuantity"))
-                    .append('\n');
-            }
+        if (options == null || options.length() == 0) return "옵션 데이터가 없습니다.";
+
+        int available = 0;
+        int soldOut = 0;
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            if (option == null) continue;
+            if (option.optBoolean("available", false)) available++;
+            else soldOut++;
         }
-        output.append("\nAPI: ").append(result.optString("apiUrl", "-"));
-        return output.toString();
+        return "현재 재고 있음 " + available + "개 옵션 · 품절 " + soldOut + "개 옵션\n감시할 옵션을 선택한 뒤 '감시 시작'을 누르세요.";
     }
 
     static String optionLabel(JSONObject option) {
@@ -447,7 +710,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) webView.goBack();
+        if (browserVisible && webView != null && webView.canGoBack()) webView.goBack();
+        else if (browserVisible) setBrowserVisible(false);
         else super.onBackPressed();
     }
 
