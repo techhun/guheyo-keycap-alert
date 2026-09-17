@@ -28,6 +28,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".RestockActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".GateActivity"
             android:exported="true">
             <intent-filter>
