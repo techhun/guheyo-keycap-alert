@@ -12,6 +12,13 @@ import {
 import { checkRestock } from './restock/engine.mjs';
 import { inspectProduct } from './restock/providers/index.mjs';
 import {
+  CONTROL_FALLBACK,
+  CONTROL_PATH,
+  formatKstDateTime,
+  monitoringStatus,
+  parseKstDateTime
+} from './restock/control.mjs';
+import {
   ANY_VALUE,
   NONE_VALUE,
   clean,
@@ -37,6 +44,7 @@ const MANAGE_CHANNEL_ID = clean(process.env.RESTOCK_MANAGE_CHANNEL_ID);
 const ALERT_CHANNEL_ID = clean(process.env.RESTOCK_ALERT_CHANNEL_ID);
 const ALLOWED_USER_IDS = new Set(clean(process.env.RESTOCK_ALLOWED_USER_IDS).split(',').map(clean).filter(Boolean));
 const POLL_SECONDS = Math.max(30, Number(process.env.RESTOCK_POLL_SECONDS) || 60);
+const BOT_MONITOR_ENABLED = clean(process.env.RESTOCK_BOT_MONITOR_ENABLED).toLowerCase() === 'true';
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const sessions = new Map();
 let monitorRunning = false;
@@ -80,17 +88,23 @@ async function readStored(path, fallback) {
   return { value: readLocalJson(path, fallback), sha: null };
 }
 
-async function updateWatchlist(message, mutator) {
-  if (githubStorageConfigured()) {
-    return updateGitHubJson(WATCHLIST_PATH, WATCHLIST_FALLBACK, message, mutator);
-  }
+async function updateStored(path, fallback, message, mutator) {
+  if (githubStorageConfigured()) return updateGitHubJson(path, fallback, message, mutator);
   localWriteQueue = localWriteQueue.then(async () => {
-    const current = readLocalJson(WATCHLIST_PATH, WATCHLIST_FALLBACK);
+    const current = readLocalJson(path, fallback);
     const next = await mutator(structuredClone(current));
-    if (next !== null && next !== undefined) writeLocalJson(WATCHLIST_PATH, next);
+    if (next !== null && next !== undefined) writeLocalJson(path, next);
     return { changed: next !== null && next !== undefined, value: next ?? current };
   });
   return localWriteQueue;
+}
+
+async function updateWatchlist(message, mutator) {
+  return updateStored(WATCHLIST_PATH, WATCHLIST_FALLBACK, message, mutator);
+}
+
+async function updateControl(message, mutator) {
+  return updateStored(CONTROL_PATH, CONTROL_FALLBACK, message, mutator);
 }
 
 function groupPageRows(session, groupIndex, pageIndex = 0) {
@@ -199,7 +213,7 @@ async function handleAdd(interaction) {
     else await interaction.editReply(groupMessage(session, 0));
   } catch (error) {
     const blocked = error?.code === 'NAVER_SMARTSTORE_BLOCKED'
-      ? '\n네이버 스마트스토어가 현재 이 봇 실행 환경의 접속을 제한했습니다. 봇을 일반 인터넷 회선/지속 브라우저 프로필 환경에서 실행해야 합니다.'
+      ? '\n네이버 스마트스토어가 현재 이 봇 실행 환경의 접속을 제한했습니다. SmartStore 상품 등록은 worker 환경에서 처리해야 합니다.'
       : '';
     await interaction.editReply({ content: `상품 정보를 읽지 못했습니다.\n\`${short(error?.message || error, 1600)}\`${blocked}`, components: [] });
   }
@@ -253,7 +267,7 @@ async function handleConfirm(interaction, parts) {
   const newItem = {
     id: crypto.randomUUID(),
     enabled: true,
-    monitor: 'bot',
+    monitor: 'worker',
     provider: session.snapshot.provider,
     url: session.snapshot.canonicalUrl,
     canonicalUrl: session.snapshot.canonicalUrl,
@@ -280,7 +294,7 @@ async function handleConfirm(interaction, parts) {
       : `✅ **재입고 감시 등록**\n${session.snapshot.title}\n\n${optionSummary(selections)}`,
     components: []
   });
-  if (!duplicate) void runMonitorOnce();
+  if (!duplicate && BOT_MONITOR_ENABLED) void runMonitorOnce();
 }
 
 async function handleCancel(interaction, parts) {
@@ -333,6 +347,100 @@ async function handleDelete(interaction, parts) {
   });
 }
 
+function updater(interaction) {
+  return {
+    id: interaction.user.id,
+    name: interaction.user.globalName || interaction.user.username || interaction.user.id
+  };
+}
+
+async function handleMonitorStart(interaction) {
+  if (!authorized(interaction)) return rejectUnauthorized(interaction);
+  await updateControl('Start restock monitoring', (control) => {
+    control.version = 1;
+    control.mode = 'manual';
+    control.schedule = null;
+    control.updatedAt = new Date().toISOString();
+    control.updatedBy = updater(interaction);
+    return control;
+  });
+  await interaction.reply({ content: '🟢 **재입고 감시 ON**\n지금부터 수동 감시 모드입니다.', ephemeral: true });
+}
+
+async function handleMonitorStop(interaction) {
+  if (!authorized(interaction)) return rejectUnauthorized(interaction);
+  await updateControl('Stop restock monitoring', (control) => {
+    control.version = 1;
+    control.mode = 'off';
+    control.schedule = null;
+    control.updatedAt = new Date().toISOString();
+    control.updatedBy = updater(interaction);
+    return control;
+  });
+  await interaction.reply({ content: '⚪ **재입고 감시 OFF**\n등록된 예약도 해제했습니다.', ephemeral: true });
+}
+
+async function handleMonitorSchedule(interaction) {
+  if (!authorized(interaction)) return rejectUnauthorized(interaction);
+  const startText = interaction.options.getString('시작', true);
+  const endText = interaction.options.getString('종료', true);
+  let startAt;
+  let endAt;
+  try {
+    startAt = parseKstDateTime(startText);
+    endAt = parseKstDateTime(endText);
+  } catch (error) {
+    return interaction.reply({ content: `예약 시간을 확인해주세요.\n${error.message}`, ephemeral: true });
+  }
+  if (Date.parse(endAt) <= Date.parse(startAt)) {
+    return interaction.reply({ content: '종료 시간은 시작 시간보다 뒤여야 합니다.', ephemeral: true });
+  }
+  if (Date.parse(endAt) <= Date.now()) {
+    return interaction.reply({ content: '이미 종료된 시간으로는 예약할 수 없습니다.', ephemeral: true });
+  }
+
+  await updateControl('Schedule restock monitoring', (control) => {
+    control.version = 1;
+    control.mode = 'scheduled';
+    control.schedule = { startAt, endAt, timezone: 'Asia/Seoul' };
+    control.updatedAt = new Date().toISOString();
+    control.updatedBy = updater(interaction);
+    return control;
+  });
+
+  const status = monitoringStatus({ mode: 'scheduled', schedule: { startAt, endAt } });
+  await interaction.reply({
+    content: [
+      '⏰ **재입고 감시 예약**',
+      `시작: **${formatKstDateTime(startAt)}**`,
+      `종료: **${formatKstDateTime(endAt)}**`,
+      `현재: **${status.active ? '🟢 감시 중' : '🟡 예약 대기'}**`
+    ].join('\n'),
+    ephemeral: true
+  });
+}
+
+async function handleMonitorStatus(interaction) {
+  if (!authorized(interaction)) return rejectUnauthorized(interaction);
+  const [{ value: control }, { value: watchlist }] = await Promise.all([
+    readStored(CONTROL_PATH, CONTROL_FALLBACK),
+    readStored(WATCHLIST_PATH, WATCHLIST_FALLBACK)
+  ]);
+  const status = monitoringStatus(control);
+  const count = (Array.isArray(watchlist.items) ? watchlist.items : []).filter((item) => item.enabled !== false).length;
+  const modeText = status.mode === 'manual' ? '수동' : status.mode === 'scheduled' ? '예약' : '중지';
+  const lines = [
+    '📡 **재입고 감시 상태**',
+    `상태: **${status.active ? '🟢 ON' : '⚪ OFF'}** · ${status.reason}`,
+    `모드: **${modeText}**`,
+    `등록 상품: **${count}개**`
+  ];
+  if (status.control.schedule?.startAt && status.control.schedule?.endAt) {
+    lines.push(`예약: **${formatKstDateTime(status.control.schedule.startAt)} ~ ${formatKstDateTime(status.control.schedule.endAt)}**`);
+  }
+  await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+}
+
 async function sendRestock({ item, snapshot, match }) {
   if (!ALERT_CHANNEL_ID) throw new Error('RESTOCK_ALERT_CHANNEL_ID is not configured; restock transition remains pending');
   const channel = await client.channels.fetch(ALERT_CHANNEL_ID);
@@ -361,16 +469,18 @@ async function saveBotState(value, sha) {
 }
 
 async function runMonitorOnce() {
-  if (monitorRunning || !client.isReady()) return;
+  if (!BOT_MONITOR_ENABLED || monitorRunning || !client.isReady()) return;
   monitorRunning = true;
   try {
-    const [{ value: watchlist }, stateRecord] = await Promise.all([
+    const [controlRecord, { value: watchlist }, stateRecord] = await Promise.all([
+      readStored(CONTROL_PATH, CONTROL_FALLBACK),
       readStored(WATCHLIST_PATH, WATCHLIST_FALLBACK),
       readStored(STATE_PATH, STATE_FALLBACK)
     ]);
+    if (!monitoringStatus(controlRecord.value).active) return;
     const botWatchlist = {
       ...watchlist,
-      items: (Array.isArray(watchlist.items) ? watchlist.items : []).filter((item) => item?.monitor === 'bot')
+      items: (Array.isArray(watchlist.items) ? watchlist.items : []).filter((item) => ['bot', 'worker'].includes(item?.monitor))
     };
     const result = await checkRestock({ watchlist: botWatchlist, state: stateRecord.value, onRestock: sendRestock });
     if (result.changed) await saveBotState(result.state, stateRecord.sha);
@@ -388,9 +498,11 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`[restock-bot] logged in as ${readyClient.user.tag}`);
-  console.log(`[restock-bot] storage=${githubStorageConfigured() ? 'github' : 'local'} poll=${POLL_SECONDS}s`);
-  void runMonitorOnce();
-  setInterval(() => void runMonitorOnce(), POLL_SECONDS * 1000).unref();
+  console.log(`[restock-bot] storage=${githubStorageConfigured() ? 'github' : 'local'} role=${BOT_MONITOR_ENABLED ? `manager+monitor(${POLL_SECONDS}s)` : 'manager-only'}`);
+  if (BOT_MONITOR_ENABLED) {
+    void runMonitorOnce();
+    setInterval(() => void runMonitorOnce(), POLL_SECONDS * 1000).unref();
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -398,6 +510,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === '입고추가') return await handleAdd(interaction);
       if (interaction.commandName === '입고목록') return await handleList(interaction);
+      if (interaction.commandName === '감시시작') return await handleMonitorStart(interaction);
+      if (interaction.commandName === '감시중지') return await handleMonitorStop(interaction);
+      if (interaction.commandName === '감시상태') return await handleMonitorStatus(interaction);
+      if (interaction.commandName === '감시예약') return await handleMonitorSchedule(interaction);
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('restock|select|')) {
       return await handleSelect(interaction, interaction.customId.split('|'));
