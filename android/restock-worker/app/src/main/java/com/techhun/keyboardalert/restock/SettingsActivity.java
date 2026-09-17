@@ -155,6 +155,45 @@ public class SettingsActivity extends Activity {
             }
         });
 
+        LinearLayout batteryCard = surface(20, 18);
+        LinearLayout.LayoutParams batteryLp = matchWrap();
+        batteryLp.topMargin = dp(10);
+        root.addView(batteryCard, batteryLp);
+
+        LinearLayout batteryHeader = new LinearLayout(this);
+        batteryHeader.setGravity(Gravity.CENTER_VERTICAL);
+        batteryCard.addView(batteryHeader, matchWrap());
+        batteryHeader.addView(text("배터리 최적화", 15, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
+        batteryStatus = text("", 12, SUB, Typeface.BOLD);
+        batteryStatus.setGravity(Gravity.CENTER);
+        batteryStatus.setPadding(dp(10), dp(5), dp(10), dp(5));
+        batteryHeader.addView(batteryStatus);
+
+        TextView batteryNote = text(
+            "장시간 감시가 중단되면 Android 앱 정보 > 배터리에서 '제한 없음'을 권장해요. 기기에 따라 메뉴 이름은 다를 수 있어요.",
+            12,
+            SUB,
+            Typeface.NORMAL
+        );
+        batteryNote.setPadding(0, dp(10), 0, 0);
+        batteryCard.addView(batteryNote);
+
+        TextView batterySettings = actionButton("앱 배터리 설정 열기", BLUE, BLUE_SOFT);
+        LinearLayout.LayoutParams batteryButtonLp = matchWrap();
+        batteryButtonLp.topMargin = dp(12);
+        batteryCard.addView(batterySettings, batteryButtonLp);
+        batterySettings.setOnClickListener(v -> {
+            try {
+                startActivity(BatteryAccess.settingsIntent(this));
+            } catch (Exception ignored) {
+                toast("앱 설정을 열지 못했어요.");
+            }
+        });
+
         LinearLayout backupCard = surface(20, 18);
         LinearLayout.LayoutParams backupLp = matchWrap();
         backupLp.topMargin = dp(10);
@@ -271,6 +310,14 @@ public class SettingsActivity extends Activity {
         notificationStatus.setText(allowed ? "허용됨" : "꺼짐");
         notificationStatus.setTextColor(allowed ? GREEN : SUB);
         notificationStatus.setBackground(roundRect(allowed ? GREEN_SOFT : FIELD, 12));
+    }
+
+    private void refreshBatteryStatus() {
+        if (batteryStatus == null) return;
+        boolean ignored = BatteryAccess.isOptimizationIgnored(this);
+        batteryStatus.setText(ignored ? "예외 적용됨" : "최적화 대상");
+        batteryStatus.setTextColor(ignored ? GREEN : SUB);
+        batteryStatus.setBackground(roundRect(ignored ? GREEN_SOFT : FIELD, 12));
     }
 
     private String versionName() {
