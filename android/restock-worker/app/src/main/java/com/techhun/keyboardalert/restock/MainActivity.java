@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
-import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -77,6 +76,15 @@ public class MainActivity extends Activity {
         settings.setDomStorageEnabled(true);
         settings.setLoadsImagesAutomatically(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+
+        // Naver treats the stock Android WebView user agent differently from a normal
+        // browser in some flows. Keep the device/WebView Chromium version, but remove
+        // the explicit embedded-WebView markers so the public product page is tested
+        // under a browser-style UA before requiring any login session.
+        String browserUserAgent = settings.getUserAgentString()
+            .replace("; wv)", ")")
+            .replace("Version/4.0 ", "");
+        settings.setUserAgentString(browserUserAgent);
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
