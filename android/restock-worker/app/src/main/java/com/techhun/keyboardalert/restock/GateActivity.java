@@ -92,6 +92,7 @@ public class GateActivity extends Activity {
         login.setGravity(Gravity.CENTER);
         login.setBackground(roundRect(BLUE, 16));
         login.setOnClickListener(v -> launchLogin());
+        Motion.press(login);
         LinearLayout.LayoutParams loginLp = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             dp(54)
@@ -101,6 +102,9 @@ public class GateActivity extends Activity {
 
         setContentView(root);
         root.requestApplyInsets();
+        Motion.enter(icon, 20L);
+        Motion.enter(name, 70L);
+        Motion.enter(login, 130L);
     }
 
     private void launchLogin() {
@@ -108,7 +112,7 @@ public class GateActivity extends Activity {
         loginLaunching = true;
         Intent intent = new Intent(this, LoginActivity.class);
         intent.putExtra(LoginActivity.EXTRA_TARGET_URL, SessionState.SMARTSTORE_HOME);
-        startActivityForResult(intent, REQUEST_LOGIN);
+        Motion.pushForResult(this, intent, REQUEST_LOGIN);
     }
 
     @Override
