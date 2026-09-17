@@ -1,91 +1,164 @@
 package com.techhun.keyboardalert.restock;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 public class MainActivity extends Activity {
     private static final String DEFAULT_URL = "https://m.smartstore.naver.com/swagkey/products/12348949592";
+    private static final int[] INTERVAL_VALUES = {15, 30, 60};
+    private static final String[] INTERVAL_LABELS = {"15초", "30초", "60초"};
+
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable statusRefresh = new Runnable() {
+        @Override
+        public void run() {
+            refreshMonitorUi();
+            uiHandler.postDelayed(this, 1500L);
+        }
+    };
 
     private WebView webView;
     private EditText urlInput;
     private TextView statusText;
     private TextView resultText;
+    private TextView selectedText;
+    private TextView monitorStatusText;
     private Button inspectButton;
+    private Button selectButton;
+    private Button startButton;
+    private Button stopButton;
+    private Spinner intervalSpinner;
+    private JSONArray latestOptions = new JSONArray();
+    private String latestTitle = "";
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         WebView.setWebContentsDebuggingEnabled(false);
+        requestNotificationPermissionIfNeeded();
+
+        var prefs = MonitorPrefs.prefs(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(12), dp(12), dp(12), dp(12));
+        root.setPadding(dp(12), dp(10), dp(12), dp(10));
+
+        TextView heading = new TextView(this);
+        heading.setText("Keyboard Restock");
+        heading.setTextSize(22f);
+        heading.setTextColor(Color.BLACK);
+        heading.setPadding(0, 0, 0, dp(6));
+        root.addView(heading);
 
         urlInput = new EditText(this);
         urlInput.setSingleLine(true);
         urlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        urlInput.setText(DEFAULT_URL);
+        urlInput.setText(prefs.getString(MonitorPrefs.KEY_URL, DEFAULT_URL));
         root.addView(urlInput, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ));
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout browserButtons = new LinearLayout(this);
+        browserButtons.setOrientation(LinearLayout.HORIZONTAL);
 
         Button openButton = new Button(this);
         openButton.setText("상품 열기");
         openButton.setOnClickListener(v -> openProduct());
-        buttons.addView(openButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        browserButtons.addView(openButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         inspectButton = new Button(this);
-        inspectButton.setText("옵션 재고 읽기");
+        inspectButton.setText("옵션 불러오기");
         inspectButton.setEnabled(false);
         inspectButton.setOnClickListener(v -> inspectInventory());
-        buttons.addView(inspectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        root.addView(buttons);
+        browserButtons.addView(inspectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(browserButtons);
 
         statusText = new TextView(this);
         statusText.setText("대기 중");
         statusText.setTextColor(Color.DKGRAY);
-        statusText.setPadding(0, dp(4), 0, dp(4));
+        statusText.setPadding(0, dp(3), 0, dp(5));
         root.addView(statusText);
 
+        LinearLayout controlRow = new LinearLayout(this);
+        controlRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        selectButton = new Button(this);
+        selectButton.setText("감시 옵션 선택");
+        selectButton.setEnabled(false);
+        selectButton.setOnClickListener(v -> chooseOptions());
+        controlRow.addView(selectButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f));
+
+        intervalSpinner = new Spinner(this);
+        ArrayAdapter<String> intervalAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, INTERVAL_LABELS);
+        intervalAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        intervalSpinner.setAdapter(intervalAdapter);
+        int savedInterval = MonitorPrefs.intervalSeconds(this);
+        for (int i = 0; i < INTERVAL_VALUES.length; i++) {
+            if (INTERVAL_VALUES[i] == savedInterval) intervalSpinner.setSelection(i);
+        }
+        controlRow.addView(intervalSpinner, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(controlRow);
+
+        selectedText = new TextView(this);
+        selectedText.setTextColor(Color.DKGRAY);
+        selectedText.setPadding(dp(4), dp(4), dp(4), dp(6));
+        root.addView(selectedText);
+
+        LinearLayout monitorButtons = new LinearLayout(this);
+        monitorButtons.setOrientation(LinearLayout.HORIZONTAL);
+
+        startButton = new Button(this);
+        startButton.setText("감시 시작");
+        startButton.setOnClickListener(v -> startMonitoring());
+        monitorButtons.addView(startButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        stopButton = new Button(this);
+        stopButton.setText("감시 중지");
+        stopButton.setOnClickListener(v -> stopMonitoring());
+        monitorButtons.addView(stopButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(monitorButtons);
+
+        monitorStatusText = new TextView(this);
+        monitorStatusText.setPadding(dp(4), dp(4), dp(4), dp(6));
+        root.addView(monitorStatusText);
+
         webView = new WebView(this);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setLoadsImagesAutomatically(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-
-        String browserUserAgent = settings.getUserAgentString()
-            .replace("; wv)", ")")
-            .replace("Version/4.0 ", "");
-        settings.setUserAgentString(browserUserAgent);
-
-        CookieManager cookieManager = CookieManager.getInstance();
-        cookieManager.setAcceptCookie(true);
-        cookieManager.setAcceptThirdPartyCookies(webView, true);
-
+        configureWebView(webView);
         webView.addJavascriptInterface(new InventoryBridge(), "RestockBridge");
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -96,8 +169,13 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                inspectButton.setEnabled(true);
-                statusText.setText("로드 완료 · " + view.getTitle() + "\n" + url);
+                boolean productPage = url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+                inspectButton.setEnabled(productPage);
+                if (url != null && url.contains("nid.naver.com")) {
+                    statusText.setText("네이버 로그인이 필요합니다. 로그인 후 상품 페이지로 돌아오세요.");
+                } else {
+                    statusText.setText("로드 완료 · " + view.getTitle() + "\n" + url);
+                }
             }
         });
 
@@ -110,21 +188,45 @@ public class MainActivity extends Activity {
         ScrollView resultScroll = new ScrollView(this);
         resultText = new TextView(this);
         resultText.setTextIsSelectable(true);
-        resultText.setTextSize(13f);
-        resultText.setPadding(dp(4), dp(8), dp(4), dp(8));
-        resultText.setText("상품을 연 뒤 '옵션 재고 읽기'를 누르세요.");
+        resultText.setTextSize(12f);
+        resultText.setPadding(dp(4), dp(6), dp(4), dp(6));
+        resultText.setText("상품 페이지가 열린 뒤 '옵션 불러오기'를 누르세요.");
         resultScroll.addView(resultText);
         root.addView(resultScroll, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(230)
+            dp(170)
         ));
 
         setContentView(root);
+        refreshSelectedSummary();
+        refreshMonitorUi();
         openProduct();
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    static void configureWebView(WebView view) {
+        WebSettings settings = view.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        String browserUserAgent = settings.getUserAgentString()
+            .replace("; wv)", ")")
+            .replace("Version/4.0 ", "");
+        settings.setUserAgentString(browserUserAgent);
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(view, true);
     }
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7001);
+        }
     }
 
     private void openProduct() {
@@ -134,6 +236,8 @@ public class MainActivity extends Activity {
             return;
         }
         inspectButton.setEnabled(false);
+        selectButton.setEnabled(false);
+        latestOptions = new JSONArray();
         resultText.setText("페이지 로딩 중...");
         webView.loadUrl(url);
     }
@@ -141,159 +245,8 @@ public class MainActivity extends Activity {
     private void inspectInventory() {
         inspectButton.setEnabled(false);
         statusText.setText("상품 API 확인 중...");
-        resultText.setText("페이지 내부에서 상품 API를 조회하고 있습니다...");
-
-        String script = """
-            (() => {
-              const send = (value) => window.RestockBridge.onResult(JSON.stringify(value));
-              (async () => {
-                try {
-                  const productMatch = location.pathname.match(/\\/products\\/(\\d+)/);
-                  const productNo = productMatch ? productMatch[1] : null;
-                  if (!productNo) {
-                    send({ ok: false, error: 'PRODUCT_NO_NOT_FOUND', pageUrl: location.href, title: document.title });
-                    return;
-                  }
-
-                  function findChannelUid(root) {
-                    if (!root || typeof root !== 'object') return null;
-                    const stack = [root];
-                    const seen = new Set();
-                    let count = 0;
-                    while (stack.length && count < 30000) {
-                      const value = stack.pop();
-                      if (!value || typeof value !== 'object' || seen.has(value)) continue;
-                      seen.add(value);
-                      count += 1;
-                      if (typeof value.channelUid === 'string' && value.channelUid.length >= 8) return value.channelUid;
-                      for (const child of Object.values(value)) {
-                        if (child && typeof child === 'object') stack.push(child);
-                      }
-                    }
-                    return null;
-                  }
-
-                  let channelUid = null;
-                  let observedApiUrl = null;
-                  const roots = [window.__PRELOADED_STATE__, window.__INITIAL_STATE__, window.__NEXT_DATA__].filter(Boolean);
-                  for (const root of roots) {
-                    channelUid = findChannelUid(root);
-                    if (channelUid) break;
-                  }
-
-                  const resources = performance.getEntriesByType('resource').map((entry) => entry.name || '');
-                  for (const resourceUrl of resources) {
-                    const match = resourceUrl.match(/\\/i\\/v2\\/channels\\/([^/]+)\\/products\\/(\\d+)/);
-                    if (!match) continue;
-                    if (!channelUid) channelUid = decodeURIComponent(match[1]);
-                    if (match[2] === productNo) observedApiUrl = resourceUrl;
-                  }
-
-                  if (!channelUid) {
-                    send({ ok: false, error: 'CHANNEL_UID_NOT_FOUND', pageUrl: location.href, title: document.title });
-                    return;
-                  }
-
-                  const candidates = [];
-                  if (observedApiUrl) candidates.push(observedApiUrl);
-                  candidates.push(`/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
-                  candidates.push(`https://smartstore.naver.com/i/v2/channels/${encodeURIComponent(channelUid)}/products/${productNo}?withWindow=false`);
-
-                  let response = null;
-                  let text = '';
-                  let usedApiUrl = null;
-                  const attempts = [];
-                  for (const apiUrl of [...new Set(candidates)]) {
-                    try {
-                      const current = await fetch(apiUrl, {
-                        credentials: 'include',
-                        headers: { accept: 'application/json, text/plain, */*' }
-                      });
-                      const currentText = await current.text();
-                      attempts.push({ url: apiUrl, status: current.status });
-                      if (current.ok) {
-                        response = current;
-                        text = currentText;
-                        usedApiUrl = apiUrl;
-                        break;
-                      }
-                      if (!response) {
-                        response = current;
-                        text = currentText;
-                        usedApiUrl = apiUrl;
-                      }
-                    } catch (error) {
-                      attempts.push({ url: apiUrl, error: String(error) });
-                    }
-                  }
-
-                  if (!response || !response.ok) {
-                    send({
-                      ok: false,
-                      error: 'PRODUCT_API_FAILED',
-                      status: response ? response.status : null,
-                      pageUrl: location.href,
-                      apiUrl: usedApiUrl,
-                      attempts,
-                      preview: text.replace(/\\s+/g, ' ').slice(0, 300)
-                    });
-                    return;
-                  }
-
-                  let data;
-                  try {
-                    data = JSON.parse(text);
-                  } catch (error) {
-                    send({ ok: false, error: 'INVALID_PRODUCT_JSON', status: response.status, apiUrl: usedApiUrl, preview: text.slice(0, 300) });
-                    return;
-                  }
-
-                  const product = data.originProduct && typeof data.originProduct === 'object'
-                    ? data.originProduct
-                    : data;
-                  const optionInfo = product?.detailAttribute?.optionInfo
-                    || data?.detailAttribute?.optionInfo
-                    || data?.optionInfo
-                    || data;
-                  const combinations = Array.isArray(optionInfo?.optionCombinations)
-                    ? optionInfo.optionCombinations
-                    : [];
-
-                  const options = combinations.map((option) => {
-                    const stock = Number(option.stockQuantity);
-                    return {
-                      id: option.id ?? null,
-                      optionName1: option.optionName1 ?? null,
-                      optionName2: option.optionName2 ?? null,
-                      optionName3: option.optionName3 ?? null,
-                      stockQuantity: Number.isFinite(stock) ? stock : null,
-                      available: option.usable !== false && Number.isFinite(stock) && stock > 0
-                    };
-                  });
-
-                  send({
-                    ok: true,
-                    pageUrl: location.href,
-                    apiUrl: usedApiUrl,
-                    title: product?.name || data?.smartstoreChannelProduct?.channelProductName || document.title,
-                    channelUid,
-                    id: product?.id ?? data?.id ?? null,
-                    productNo: data?.productNo ?? productNo,
-                    statusType: product?.statusType || data?.statusType || data?.productStatusType || null,
-                    stockQuantity: product?.stockQuantity ?? data?.stockQuantity ?? null,
-                    optionCombinationCount: options.length,
-                    options,
-                    attempts
-                  });
-                } catch (error) {
-                  send({ ok: false, error: 'JS_ERROR', message: String(error && (error.stack || error.message) || error) });
-                }
-              })();
-              return 'STARTED';
-            })()
-            """;
-
-        webView.evaluateJavascript(script, ignored -> {});
+        resultText.setText("페이지 내부에서 옵션 재고를 조회하고 있습니다...");
+        webView.evaluateJavascript(InventoryScript.SCRIPT, ignored -> {});
     }
 
     private class InventoryBridge {
@@ -307,17 +260,141 @@ public class MainActivity extends Activity {
         inspectButton.setEnabled(true);
         try {
             JSONObject result = new JSONObject(json);
-            if (result.optBoolean("ok", false)) {
-                statusText.setText("옵션 재고 조회 성공");
-                resultText.setText(formatInventory(result));
-            } else {
-                statusText.setText("옵션 재고 조회 실패 · " + result.optString("error", "UNKNOWN"));
+            if (!result.optBoolean("ok", false)) {
+                latestOptions = new JSONArray();
+                selectButton.setEnabled(false);
+                statusText.setText("옵션 조회 실패 · " + result.optString("error", "UNKNOWN"));
                 resultText.setText(result.toString(2));
+                return;
             }
+
+            latestTitle = result.optString("title", "상품");
+            latestOptions = result.optJSONArray("options");
+            if (latestOptions == null) latestOptions = new JSONArray();
+            selectButton.setEnabled(latestOptions.length() > 0);
+            statusText.setText("옵션 조회 성공 · " + latestOptions.length() + "개");
+            resultText.setText(formatInventory(result));
         } catch (Exception error) {
             statusText.setText("결과 파싱 실패");
             resultText.setText("raw:\n" + json + "\n\nerror:\n" + error);
         }
+    }
+
+    private void chooseOptions() {
+        if (latestOptions.length() == 0) {
+            Toast.makeText(this, "먼저 옵션을 불러오세요.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Set<String> saved = new HashSet<>(MonitorPrefs.selectedIds(this));
+        String[] labels = new String[latestOptions.length()];
+        boolean[] checked = new boolean[latestOptions.length()];
+        for (int i = 0; i < latestOptions.length(); i++) {
+            JSONObject option = latestOptions.optJSONObject(i);
+            String id = option == null ? "" : option.optString("id", "");
+            String label = option == null ? "옵션" : optionLabel(option);
+            int stock = option == null || option.isNull("stockQuantity") ? -1 : option.optInt("stockQuantity", -1);
+            labels[i] = label + (stock >= 0 ? " · 현재 " + stock + "개" : "");
+            checked[i] = saved.contains(id);
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("감시할 옵션 선택")
+            .setMultiChoiceItems(labels, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장", (dialog, which) -> {
+                List<String> ids = new ArrayList<>();
+                Map<String, String> selectedLabels = new LinkedHashMap<>();
+                for (int i = 0; i < checked.length; i++) {
+                    if (!checked[i]) continue;
+                    JSONObject option = latestOptions.optJSONObject(i);
+                    if (option == null) continue;
+                    String id = option.optString("id", "");
+                    if (id.isBlank()) continue;
+                    ids.add(id);
+                    selectedLabels.put(id, optionLabel(option));
+                }
+                if (ids.isEmpty()) {
+                    Toast.makeText(this, "최소 한 개 옵션을 선택하세요.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                MonitorPrefs.saveConfig(
+                    this,
+                    urlInput.getText().toString().trim(),
+                    latestTitle,
+                    ids,
+                    selectedLabels,
+                    selectedIntervalSeconds()
+                );
+                refreshSelectedSummary();
+                Toast.makeText(this, ids.size() + "개 옵션을 저장했습니다.", Toast.LENGTH_SHORT).show();
+            })
+            .show();
+    }
+
+    private int selectedIntervalSeconds() {
+        int position = intervalSpinner.getSelectedItemPosition();
+        if (position < 0 || position >= INTERVAL_VALUES.length) return 30;
+        return INTERVAL_VALUES[position];
+    }
+
+    private void startMonitoring() {
+        List<String> ids = MonitorPrefs.selectedIds(this);
+        if (ids.isEmpty()) {
+            Toast.makeText(this, "옵션을 불러온 뒤 감시할 옵션을 선택하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        String configuredUrl = MonitorPrefs.prefs(this).getString(MonitorPrefs.KEY_URL, "");
+        String currentUrl = urlInput.getText().toString().trim();
+        if (!configuredUrl.equals(currentUrl)) {
+            Toast.makeText(this, "URL이 바뀌었습니다. 옵션을 다시 불러와 선택하세요.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Map<String, String> labels = MonitorPrefs.selectedLabels(this);
+        String title = MonitorPrefs.prefs(this).getString(MonitorPrefs.KEY_TITLE, latestTitle);
+        MonitorPrefs.saveConfig(this, currentUrl, title, ids, labels, selectedIntervalSeconds());
+        Intent service = new Intent(this, MonitorService.class);
+        startForegroundService(service);
+        MonitorPrefs.setRunning(this, true);
+        refreshMonitorUi();
+        Toast.makeText(this, "재입고 감시를 시작했습니다.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void stopMonitoring() {
+        Intent intent = new Intent(this, MonitorService.class).setAction(MonitorService.ACTION_STOP);
+        startService(intent);
+        MonitorPrefs.setRunning(this, false);
+        refreshMonitorUi();
+        Toast.makeText(this, "재입고 감시를 중지했습니다.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void refreshSelectedSummary() {
+        Map<String, String> labels = MonitorPrefs.selectedLabels(this);
+        if (labels.isEmpty()) {
+            selectedText.setText("감시 옵션: 아직 선택하지 않음");
+            return;
+        }
+        StringBuilder summary = new StringBuilder("감시 옵션 ").append(labels.size()).append("개\n");
+        int count = 0;
+        for (String label : labels.values()) {
+            if (count++ >= 4) {
+                summary.append("외 ").append(labels.size() - 4).append("개");
+                break;
+            }
+            summary.append("• ").append(label).append('\n');
+        }
+        selectedText.setText(summary.toString().trim());
+    }
+
+    private void refreshMonitorUi() {
+        var prefs = MonitorPrefs.prefs(this);
+        boolean running = prefs.getBoolean(MonitorPrefs.KEY_RUNNING, false);
+        String status = prefs.getString(MonitorPrefs.KEY_LAST_STATUS, running ? "감시 시작 중" : "대기 중");
+        startButton.setEnabled(!running);
+        stopButton.setEnabled(running);
+        monitorStatusText.setText((running ? "🟢 감시 중" : "⚪ 감시 중지") + " · " + status);
     }
 
     private String formatInventory(JSONObject result) {
@@ -328,32 +405,44 @@ public class MainActivity extends Activity {
 
         JSONArray options = result.optJSONArray("options");
         if (options == null || options.length() == 0) {
-            output.append("옵션 조합 데이터 없음\n\n");
+            output.append("옵션 조합 데이터 없음\n");
         } else {
             for (int i = 0; i < options.length(); i++) {
                 JSONObject option = options.optJSONObject(i);
                 if (option == null) continue;
-                StringBuilder name = new StringBuilder();
-                appendOptionName(name, option.optString("optionName1", ""));
-                appendOptionName(name, option.optString("optionName2", ""));
-                appendOptionName(name, option.optString("optionName3", ""));
                 output.append(option.optBoolean("available", false) ? "[재고] " : "[품절] ")
-                    .append(name.length() == 0 ? option.optString("id", "옵션") : name)
+                    .append(optionLabel(option))
                     .append(" · 수량 ")
                     .append(option.isNull("stockQuantity") ? "?" : option.optInt("stockQuantity"))
                     .append('\n');
             }
         }
-
-        output.append("\nAPI: ").append(result.optString("apiUrl", "-")).append('\n');
-        output.append("channelUid: ").append(result.optString("channelUid", "-")).append('\n');
+        output.append("\nAPI: ").append(result.optString("apiUrl", "-"));
         return output.toString();
     }
 
-    private void appendOptionName(StringBuilder target, String value) {
-        if (value == null || value.isBlank() || "null".equals(value)) return;
-        if (target.length() > 0) target.append(" / ");
-        target.append(value);
+    static String optionLabel(JSONObject option) {
+        StringBuilder target = new StringBuilder();
+        for (String key : new String[]{"optionName1", "optionName2", "optionName3"}) {
+            String value = option.optString(key, "");
+            if (value.isBlank() || "null".equals(value)) continue;
+            if (target.length() > 0) target.append(" / ");
+            target.append(value);
+        }
+        return target.length() > 0 ? target.toString() : option.optString("id", "옵션");
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        uiHandler.removeCallbacks(statusRefresh);
+        uiHandler.post(statusRefresh);
+    }
+
+    @Override
+    protected void onPause() {
+        uiHandler.removeCallbacks(statusRefresh);
+        super.onPause();
     }
 
     @Override
@@ -364,6 +453,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null);
         if (webView != null) {
             webView.removeJavascriptInterface("RestockBridge");
             webView.stopLoading();
