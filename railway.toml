@@ -1,6 +1,0 @@
-[build]
-builder = "RAILPACK"
-
-[deploy]
-startCommand = "node scripts/railway-egress-probe.mjs"
-restartPolicyType = "NEVER"
