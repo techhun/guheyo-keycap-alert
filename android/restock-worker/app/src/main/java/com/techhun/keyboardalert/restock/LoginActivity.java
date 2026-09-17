@@ -56,10 +56,10 @@ public class LoginActivity extends Activity {
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(6), dp(16), dp(6));
+        header.setPadding(dp(16), 0, dp(16), 0);
         root.addView(header, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(54)
+            dp(46)
         ));
 
         TextView close = new TextView(this);
@@ -68,23 +68,10 @@ public class LoginActivity extends Activity {
         close.setTextColor(Color.rgb(49, 130, 246));
         close.setTypeface(null, Typeface.BOLD);
         close.setGravity(Gravity.CENTER_VERTICAL);
-        close.setPadding(0, 0, dp(20), 0);
         close.setOnClickListener(v -> finish());
         header.addView(close, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.MATCH_PARENT
-        ));
-
-        TextView title = new TextView(this);
-        title.setText("네이버 로그인");
-        title.setTextSize(19f);
-        title.setTextColor(Color.rgb(25, 31, 40));
-        title.setTypeface(null, Typeface.BOLD);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(title, new LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            1f
         ));
 
         webView = new WebView(this);
