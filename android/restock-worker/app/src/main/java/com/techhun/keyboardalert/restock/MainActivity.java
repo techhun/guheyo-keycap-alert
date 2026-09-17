@@ -4,10 +4,12 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,6 +18,8 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -42,6 +46,7 @@ public class MainActivity extends Activity {
     private static final int[] INTERVAL_VALUES = {15, 30, 60};
     private static final String[] INTERVAL_LABELS = {"15초", "30초", "60초"};
     private static final String SMARTSTORE_HOME = "https://m.smartstore.naver.com/";
+    private static final int PRODUCT_PREVIEW_LIMIT = 4;
 
     private static final int BG = Color.rgb(247, 248, 250);
     private static final int WHITE = Color.WHITE;
@@ -68,6 +73,7 @@ public class MainActivity extends Activity {
     private TextView sessionButton;
     private TextView[] intervalChips;
     private WebView webView;
+    private Dialog optionDialog;
 
     private JSONArray latestOptions = new JSONArray();
     private String latestTitle = "";
@@ -79,6 +85,8 @@ public class MainActivity extends Activity {
     private String pendingEnableProductId = null;
     private boolean autoInspect;
     private boolean loginLaunching;
+    private boolean optionLoadInProgress;
+    private boolean showAllProducts;
     private int intervalSeconds = 30;
 
     @Override
@@ -103,7 +111,7 @@ public class MainActivity extends Activity {
         topRow.setGravity(Gravity.CENTER_VERTICAL);
         content.addView(topRow, matchWrap());
 
-        TextView title = text("재입고 감시", 30, TEXT, Typeface.BOLD);
+        TextView title = text("재입고 알림", 30, TEXT, Typeface.BOLD);
         topRow.addView(title, new LinearLayout.LayoutParams(
             0,
             LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -166,7 +174,7 @@ public class MainActivity extends Activity {
                 }
                 if (isProductUrl(url) && autoInspect) {
                     autoInspect = false;
-                    handler.postDelayed(MainActivity.this::inspectInventory, 900L);
+                    handler.postDelayed(MainActivity.this::inspectInventory, 700L);
                 }
             }
         });
@@ -177,8 +185,13 @@ public class MainActivity extends Activity {
     }
 
     private void handleSessionAction() {
-        if (hasNaverSession()) confirmClearLogin();
-        else openLoginForExistingProduct();
+        if (hasNaverSession()) {
+            ProductStore.disableAll(this);
+            syncMonitorService();
+            clearAppLogin();
+        } else {
+            openLoginForExistingProduct();
+        }
     }
 
     private boolean hasNaverSession() {
@@ -197,7 +210,15 @@ public class MainActivity extends Activity {
         sessionButton.setBackground(roundRect(loggedIn ? FIELD : BLUE_SOFT, 14));
     }
 
+    private boolean optionFlowBusy() {
+        return optionLoadInProgress || (optionDialog != null && optionDialog.isShowing());
+    }
+
     private void addProduct() {
+        if (optionFlowBusy()) {
+            toast("옵션을 불러오는 중이에요.");
+            return;
+        }
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
@@ -213,7 +234,11 @@ public class MainActivity extends Activity {
 
     private void editProduct(JSONObject product) {
         if (product.optBoolean("enabled", false)) {
-            toast("감시를 중지한 뒤 옵션을 수정해주세요.");
+            toast("알림을 끈 뒤 옵션을 수정해주세요.");
+            return;
+        }
+        if (optionFlowBusy()) {
+            toast("옵션을 불러오는 중이에요.");
             return;
         }
         loadProductForEdit(product.optString("url"), product.optString("id"));
@@ -224,18 +249,23 @@ public class MainActivity extends Activity {
             toast("SmartStore 상품 URL을 확인해주세요.");
             return;
         }
+        if (optionFlowBusy()) return;
+
+        optionLoadInProgress = true;
         pendingUrl = url;
         editingProductId = id;
         latestOptions = new JSONArray();
+        latestTitle = "";
         latestApiUrl = "";
         latestChannelUid = "";
         latestProductNo = "";
         autoInspect = true;
+        webView.stopLoading();
         webView.loadUrl(url);
     }
 
     private void inspectInventory() {
-        if (!isProductUrl(webView.getUrl())) return;
+        if (!isProductUrl(webView.getUrl()) || !optionLoadInProgress) return;
         webView.evaluateJavascript(InventoryScript.SCRIPT, ignored -> {});
     }
 
@@ -246,67 +276,224 @@ public class MainActivity extends Activity {
     }
 
     private void handleInventory(String json) {
+        if (!optionLoadInProgress) return;
         try {
             JSONObject result = new JSONObject(json);
             if (!result.optBoolean("ok")) {
-                String error = result.optString("error", "UNKNOWN");
-                if ("PRODUCT_API_FAILED".equals(error) && !pendingUrl.isBlank()) launchLogin(pendingUrl);
-                else toast("옵션 조회에 실패했어요.");
+                int status = result.optInt("status", 0);
+                boolean authFailure = status == 401 || status == 403 || !hasNaverSession();
+                if (authFailure && !pendingUrl.isBlank()) {
+                    launchLogin(pendingUrl);
+                } else {
+                    optionLoadInProgress = false;
+                    clearPendingEdit();
+                    toast("옵션 조회에 실패했어요.");
+                }
                 return;
             }
+
             latestTitle = result.optString("title", "SmartStore 상품");
             latestOptions = result.optJSONArray("options");
             latestApiUrl = result.optString("apiUrl", "");
             latestChannelUid = result.optString("channelUid", "");
             latestProductNo = result.optString("productNo", "");
             if (latestOptions == null || latestOptions.length() == 0) {
+                optionLoadInProgress = false;
+                clearPendingEdit();
                 toast("선택 가능한 옵션이 없어요.");
                 return;
             }
             showOptionPicker();
         } catch (Exception e) {
+            optionLoadInProgress = false;
+            clearPendingEdit();
             toast("상품 정보를 처리하지 못했어요.");
         }
     }
 
     private void showOptionPicker() {
-        JSONObject existing = editingProductId == null
-            ? ProductStore.find(this, ProductStore.idFromUrl(pendingUrl))
-            : ProductStore.find(this, editingProductId);
+        if (optionDialog != null && optionDialog.isShowing()) return;
+
+        final String targetUrl = pendingUrl;
+        final String targetEditingId = editingProductId;
+        final String titleSnapshot = latestTitle;
+        final String apiUrlSnapshot = latestApiUrl;
+        final String channelUidSnapshot = latestChannelUid;
+        final String productNoSnapshot = latestProductNo;
+        final JSONArray optionsSnapshot = latestOptions;
+
+        JSONObject existing = targetEditingId == null
+            ? ProductStore.find(this, ProductStore.idFromUrl(targetUrl))
+            : ProductStore.find(this, targetEditingId);
         Set<String> saved = new HashSet<>();
         if (existing != null) {
             JSONArray ids = existing.optJSONArray("selectedIds");
-            if (ids != null) for (int i = 0; i < ids.length(); i++) saved.add(ids.optString(i));
+            if (ids != null) {
+                for (int i = 0; i < ids.length(); i++) saved.add(ids.optString(i));
+            }
         }
 
-        String[] rows = new String[latestOptions.length()];
-        boolean[] checked = new boolean[latestOptions.length()];
-        for (int i = 0; i < latestOptions.length(); i++) {
-            JSONObject option = latestOptions.optJSONObject(i);
-            String id = option == null ? "" : option.optString("id");
+        boolean[] checked = new boolean[optionsSnapshot.length()];
+        for (int i = 0; i < optionsSnapshot.length(); i++) {
+            JSONObject option = optionsSnapshot.optJSONObject(i);
+            checked[i] = option != null && saved.contains(option.optString("id"));
+        }
+
+        Dialog dialog = new Dialog(this);
+        optionDialog = dialog;
+        optionLoadInProgress = false;
+        boolean[] committed = {false};
+
+        LinearLayout panel = surface(24, 20);
+        panel.setBackground(roundRect(WHITE, 24));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(header, matchWrap());
+        TextView dialogTitle = text("옵션 선택", 21, TEXT, Typeface.BOLD);
+        header.addView(dialogTitle, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
+        TextView close = text("닫기", 14, SUB, Typeface.BOLD);
+        close.setPadding(dp(12), dp(8), 0, dp(8));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close);
+
+        TextView productName = text(titleSnapshot, 13, SUB, Typeface.NORMAL);
+        productName.setPadding(0, dp(5), 0, dp(14));
+        panel.addView(productName);
+
+        TextView selectedCount = text("", 13, BLUE, Typeface.BOLD);
+        selectedCount.setPadding(0, 0, 0, dp(10));
+        panel.addView(selectedCount);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout optionList = new LinearLayout(this);
+        optionList.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(optionList);
+        panel.addView(scroll, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(390)
+        ));
+
+        LinearLayout[] rows = new LinearLayout[optionsSnapshot.length()];
+        TextView[] marks = new TextView[optionsSnapshot.length()];
+        for (int i = 0; i < optionsSnapshot.length(); i++) {
+            final int index = i;
+            JSONObject option = optionsSnapshot.optJSONObject(i);
             int stock = option == null || option.isNull("stockQuantity")
                 ? -1
                 : option.optInt("stockQuantity", -1);
-            rows[i] = optionLabel(option) + "  ·  "
-                + (stock > 0 ? stock + "개" : stock == 0 ? "품절" : "재고 ?");
-            checked[i] = saved.contains(id);
-        }
 
-        new AlertDialog.Builder(this)
-            .setTitle(latestTitle)
-            .setMultiChoiceItems(rows, checked, (d, which, value) -> checked[which] = value)
-            .setNegativeButton("취소", null)
-            .setPositiveButton("저장", (d, w) -> saveProductSelection(checked))
-            .show();
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            LinearLayout.LayoutParams rowLp = matchWrap();
+            rowLp.bottomMargin = dp(8);
+            optionList.addView(row, rowLp);
+
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            row.addView(left, new LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ));
+            left.addView(text(optionLabel(option), 14, TEXT, Typeface.BOLD));
+            String stockLabel = stock > 0 ? "재고 " + stock + "개" : stock == 0 ? "품절" : "재고 확인 중";
+            TextView stockView = text(stockLabel, 12, stock > 0 ? GREEN : SUB, Typeface.NORMAL);
+            stockView.setPadding(0, dp(4), 0, 0);
+            left.addView(stockView);
+
+            TextView mark = text("", 19, BLUE, Typeface.BOLD);
+            mark.setGravity(Gravity.CENTER);
+            mark.setPadding(dp(12), 0, 0, 0);
+            row.addView(mark);
+            rows[i] = row;
+            marks[i] = mark;
+            applyOptionRowState(row, mark, checked[i]);
+
+            row.setOnClickListener(v -> {
+                checked[index] = !checked[index];
+                applyOptionRowState(rows[index], marks[index], checked[index]);
+                updateSelectedCount(selectedCount, checked);
+            });
+        }
+        updateSelectedCount(selectedCount, checked);
+
+        TextView save = text("저장", 15, Color.WHITE, Typeface.BOLD);
+        save.setGravity(Gravity.CENTER);
+        save.setBackground(roundRect(BLUE, 14));
+        save.setPadding(0, dp(14), 0, dp(14));
+        LinearLayout.LayoutParams saveLp = matchWrap();
+        saveLp.topMargin = dp(8);
+        panel.addView(save, saveLp);
+        save.setOnClickListener(v -> {
+            if (saveProductSelection(
+                checked,
+                targetUrl,
+                targetEditingId,
+                titleSnapshot,
+                apiUrlSnapshot,
+                channelUidSnapshot,
+                productNoSnapshot,
+                optionsSnapshot
+            )) {
+                committed[0] = true;
+                dialog.dismiss();
+            }
+        });
+
+        dialog.setContentView(panel);
+        dialog.setCancelable(true);
+        dialog.setOnDismissListener(d -> {
+            optionDialog = null;
+            optionLoadInProgress = false;
+            if (!committed[0]) clearPendingEdit();
+        });
+        dialog.show();
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            WindowManager.LayoutParams lp = window.getAttributes();
+            lp.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.92f);
+            lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            lp.dimAmount = 0.32f;
+            window.setAttributes(lp);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
     }
 
-    private void saveProductSelection(boolean[] checked) {
+    private void applyOptionRowState(LinearLayout row, TextView mark, boolean selected) {
+        row.setBackground(roundRect(selected ? BLUE_SOFT : FIELD, 14));
+        mark.setText(selected ? "✓" : "");
+    }
+
+    private void updateSelectedCount(TextView view, boolean[] checked) {
+        int count = 0;
+        for (boolean value : checked) if (value) count++;
+        view.setText(count + "개 선택");
+    }
+
+    private boolean saveProductSelection(
+        boolean[] checked,
+        String targetUrl,
+        String targetEditingId,
+        String title,
+        String apiUrl,
+        String channelUid,
+        String productNo,
+        JSONArray options
+    ) {
         JSONArray ids = new JSONArray();
         JSONObject labels = new JSONObject();
         try {
             for (int i = 0; i < checked.length; i++) {
                 if (!checked[i]) continue;
-                JSONObject option = latestOptions.optJSONObject(i);
+                JSONObject option = options.optJSONObject(i);
                 if (option == null) continue;
                 String id = option.optString("id");
                 if (id.isBlank()) continue;
@@ -314,25 +501,41 @@ public class MainActivity extends Activity {
                 labels.put(id, optionLabel(option));
             }
             if (ids.length() == 0) {
-                toast("최소 한 개 옵션을 선택해주세요.");
-                return;
+                toast("옵션을 하나 이상 선택해주세요.");
+                return false;
             }
+            if (targetUrl == null || targetUrl.isBlank()) return false;
+
             JSONObject product = new JSONObject();
-            product.put("id", ProductStore.idFromUrl(pendingUrl));
-            product.put("url", pendingUrl);
-            product.put("title", latestTitle);
+            product.put("id", targetEditingId == null || targetEditingId.isBlank()
+                ? ProductStore.idFromUrl(targetUrl)
+                : targetEditingId);
+            product.put("url", targetUrl);
+            product.put("title", title);
             product.put("selectedIds", ids);
             product.put("selectedLabels", labels);
-            product.put("apiUrl", latestApiUrl);
-            product.put("channelUid", latestChannelUid);
-            product.put("productNo", latestProductNo);
+            product.put("apiUrl", apiUrl);
+            product.put("channelUid", channelUid);
+            product.put("productNo", productNo);
             ProductStore.upsert(this, product);
-            editingProductId = null;
-            pendingUrl = "";
+            clearPendingEdit();
             renderProducts();
+            return true;
         } catch (Exception e) {
             toast("저장하지 못했어요.");
+            return false;
         }
+    }
+
+    private void clearPendingEdit() {
+        editingProductId = null;
+        pendingUrl = "";
+        latestOptions = new JSONArray();
+        latestTitle = "";
+        latestApiUrl = "";
+        latestChannelUid = "";
+        latestProductNo = "";
+        autoInspect = false;
     }
 
     private void renderProducts() {
@@ -341,14 +544,18 @@ public class MainActivity extends Activity {
         JSONArray products = ProductStore.list(this);
         if (products.length() == 0) {
             LinearLayout empty = surface(20, 18);
-            TextView value = text("감시할 상품이 없어요", 15, SUB, Typeface.NORMAL);
+            TextView value = text("등록된 상품이 없어요", 15, SUB, Typeface.NORMAL);
             value.setGravity(Gravity.CENTER);
             empty.addView(value);
             productList.addView(empty, sectionParams());
             return;
         }
 
-        for (int i = 0; i < products.length(); i++) {
+        int visibleCount = showAllProducts
+            ? products.length()
+            : Math.min(PRODUCT_PREVIEW_LIMIT, products.length());
+
+        for (int i = 0; i < visibleCount; i++) {
             JSONObject product = products.optJSONObject(i);
             if (product == null) continue;
             boolean enabled = product.optBoolean("enabled", false);
@@ -367,7 +574,7 @@ public class MainActivity extends Activity {
                 1f
             ));
 
-            TextView badge = text(enabled ? "감시 중" : "중지", 12, enabled ? GREEN : SUB, Typeface.BOLD);
+            TextView badge = text(enabled ? "알림 켜짐" : "알림 꺼짐", 12, enabled ? GREEN : SUB, Typeface.BOLD);
             badge.setGravity(Gravity.CENTER);
             badge.setPadding(dp(10), dp(6), dp(10), dp(6));
             badge.setBackground(roundRect(enabled ? GREEN_SOFT : FIELD, 12));
@@ -404,14 +611,27 @@ public class MainActivity extends Activity {
             card.addView(actions, matchWrap());
 
             Button toggle = enabled
-                ? button("감시 중지", RED, RED_SOFT)
-                : button("감시 시작", Color.WHITE, BLUE);
+                ? button("알림 끄기", RED, RED_SOFT)
+                : button("알림 켜기", Color.WHITE, BLUE);
             toggle.setOnClickListener(v -> toggleProduct(product));
             actions.addView(toggle, rowParams(1f, 0));
 
-            Button edit = softButton("옵션 수정");
+            Button edit = softButton("옵션");
             edit.setOnClickListener(v -> editProduct(product));
-            actions.addView(edit, rowParams(1f, 8));
+            actions.addView(edit, rowParams(0.72f, 8));
+        }
+
+        if (products.length() > PRODUCT_PREVIEW_LIMIT) {
+            int hidden = products.length() - PRODUCT_PREVIEW_LIMIT;
+            String label = showAllProducts ? "접기" : hidden + "개 더보기";
+            TextView more = text(label, 14, BLUE, Typeface.BOLD);
+            more.setGravity(Gravity.CENTER);
+            more.setPadding(0, dp(12), 0, dp(12));
+            more.setOnClickListener(v -> {
+                showAllProducts = !showAllProducts;
+                renderProducts();
+            });
+            productList.addView(more, matchWrap());
         }
     }
 
@@ -478,8 +698,13 @@ public class MainActivity extends Activity {
         if (requestCode != REQUEST_LOGIN) return;
         loginLaunching = false;
         refreshSessionButton();
+
         if (resultCode != RESULT_OK) {
             pendingEnableProductId = null;
+            if (optionLoadInProgress) {
+                optionLoadInProgress = false;
+                clearPendingEdit();
+            }
             return;
         }
 
@@ -490,22 +715,10 @@ public class MainActivity extends Activity {
             renderProducts();
         }
 
-        if (!pendingUrl.isBlank()) {
+        if (!pendingUrl.isBlank() && optionLoadInProgress) {
             autoInspect = true;
             webView.loadUrl(pendingUrl);
         }
-    }
-
-    private void confirmClearLogin() {
-        new AlertDialog.Builder(this)
-            .setTitle("로그아웃할까요?")
-            .setNegativeButton("취소", null)
-            .setPositiveButton("로그아웃", (d, w) -> {
-                ProductStore.disableAll(this);
-                syncMonitorService();
-                clearAppLogin();
-            })
-            .show();
     }
 
     private void clearAppLogin() {
@@ -680,6 +893,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (optionDialog != null && optionDialog.isShowing()) optionDialog.dismiss();
         if (webView != null) {
             webView.removeJavascriptInterface("RestockBridge");
             webView.stopLoading();
