@@ -1,0 +1,110 @@
+name: Temporary SmartStore curl_cffi probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-smartstore-curlcffi-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install curl_cffi
+        run: pip install --disable-pip-version-check curl_cffi
+      - name: Probe SmartStore with browser TLS fingerprint
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/probe.py" <<'PY'
+          import json, random, re, string
+          from curl_cffi import requests
+
+          TARGETS = [
+              ('swag', 'https://m.smartstore.naver.com/swagkey/products/12348949592'),
+              ('geon', 'https://m.smartstore.naver.com/geonlab/products/13233558774'),
+          ]
+
+          def summarize(mode, name, response):
+              text = response.text or ''
+              title_match = re.search(r'<title[^>]*>([^<]*)</title>', text, re.I)
+              title = re.sub(r'\s+', ' ', title_match.group(1)).strip() if title_match else ''
+              print(json.dumps({
+                  'mode': mode,
+                  'name': name,
+                  'status': response.status_code,
+                  'finalUrl': response.url,
+                  'server': response.headers.get('server'),
+                  'len': len(text),
+                  'title': title[:120],
+                  'preloaded': 'window.__PRELOADED_STATE__' in text,
+                  'errorPage': bool(re.search(r'에러페이지|시스템오류|Too Many Requests|현재 서비스 접속이 불가', text[:30000], re.I)),
+              }, ensure_ascii=False))
+
+          def make_nnb():
+              return 'PPYXCW' + ''.join(random.choices(string.ascii_uppercase, k=10))
+
+          modes = [
+              ('chrome-direct', False, False),
+              ('naver-inapp-direct', True, False),
+              ('naver-inapp-warmup', True, True),
+          ]
+
+          for mode, inapp, warmup in modes:
+              s = requests.Session(impersonate='chrome')
+              s.cookies.set('NNB', make_nnb(), domain='.naver.com')
+              headers = {
+                  'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                  'referer': 'https://shopping.naver.com/',
+              }
+              if inapp:
+                  headers['user-agent'] = 'NAVER(inapp;navershopping;0;1.0.0)'
+              if warmup:
+                  for url in [
+                      'https://shopping.naver.com/ns/home',
+                      'https://msearch.shopping.naver.com/remote_frame.html',
+                  ]:
+                      try:
+                          r = s.get(url, headers=headers, timeout=20, allow_redirects=True)
+                          print(json.dumps({'mode': mode, 'warmup': url, 'status': r.status_code, 'len': len(r.text or '')}, ensure_ascii=False))
+                      except Exception as e:
+                          print(json.dumps({'mode': mode, 'warmup': url, 'error': repr(e)}, ensure_ascii=False))
+              for name, url in TARGETS:
+                  try:
+                      r = s.get(url, headers=headers, timeout=30, allow_redirects=True)
+                      summarize(mode, name, r)
+                  except Exception as e:
+                      print(json.dumps({'mode': mode, 'name': name, 'error': repr(e)}, ensure_ascii=False))
+          PY
+          python "$RUNNER_TEMP/probe.py"
+
+  cleanup:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/tmp-smartstore-curlcffi-test.yml
+          git commit -m 'Remove temporary SmartStore curl_cffi probe [skip ci]'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
