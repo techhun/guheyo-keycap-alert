@@ -62,7 +62,14 @@ async function fetchProductInPage(page, channelUid, productNo) {
 }
 
 const target = parseTarget(input);
-const profileDir = '.restock-probe-profile';
+const profileDir = process.env.RESTOCK_PROBE_USER_DATA_DIR || '.restock-probe-profile';
+const chromeProfile = process.env.RESTOCK_PROBE_PROFILE_DIRECTORY || '';
+const launchArgs = chromeProfile ? [`--profile-directory=${chromeProfile}`] : [];
+
+console.log('[probe-profile]', JSON.stringify({
+  userDataDir: profileDir,
+  profileDirectory: chromeProfile || '(temporary probe profile)'
+}));
 
 let context;
 try {
@@ -70,11 +77,17 @@ try {
     channel: 'chrome',
     headless: false,
     viewport: { width: 1280, height: 900 },
-    locale: 'ko-KR'
+    locale: 'ko-KR',
+    args: launchArgs
   });
 } catch (error) {
   console.error('[probe] Chrome 실행 실패:', error?.message || error);
-  console.error('[probe] PC에 Chrome이 설치되어 있는지 확인하세요.');
+  if (process.env.RESTOCK_PROBE_USER_DATA_DIR) {
+    console.error('[probe] 실제 Chrome 프로필을 사용하는 경우 실행 중인 Chrome을 모두 종료한 뒤 다시 시도하세요.');
+    console.error('[probe] 작업 관리자에 chrome.exe가 남아 있으면 그것도 종료해야 할 수 있습니다.');
+  } else {
+    console.error('[probe] PC에 Chrome이 설치되어 있는지 확인하세요.');
+  }
   process.exit(1);
 }
 
