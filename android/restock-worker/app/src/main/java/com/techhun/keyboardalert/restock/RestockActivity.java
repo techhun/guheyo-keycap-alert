@@ -66,6 +66,7 @@ public class RestockActivity extends MainActivity {
         );
         brandLp.leftMargin = dp(10);
         header.addView(brand, 1, brandLp);
+        Motion.enter(brand, 15L);
     }
 
     private void routeToGate() {
