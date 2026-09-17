@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
 const DISCORD_WEBHOOK_URL = (process.env.SYSTEM_DISCORD_WEBHOOK_URL || '').trim();
+const FAILURE_THRESHOLD = 3;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function clean(value) {
@@ -12,9 +13,13 @@ function truncate(value, maxLength = 1000) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+function currentRunId() {
+  return clean(process.env.GITHUB_RUN_ID);
+}
+
 function runUrl() {
   const repository = clean(process.env.GITHUB_REPOSITORY);
-  const runId = clean(process.env.GITHUB_RUN_ID);
+  const runId = currentRunId();
   return repository && runId ? `https://github.com/${repository}/actions/runs/${runId}` : '';
 }
 
@@ -86,34 +91,95 @@ function baseEmbed(title) {
   };
 }
 
+function failureCount(source) {
+  const value = Number(source?.consecutiveFailures || 0);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function clearPendingFailure(source) {
+  const next = { ...source };
+  delete next.consecutiveFailures;
+  delete next.lastFailureRunId;
+  delete next.lastFailureAt;
+  return next;
+}
+
 async function transition(group, sourceKey, status, label, detail = '') {
   if (!['ok', 'fail'].includes(status)) throw new Error(`Unknown health status: ${status}`);
 
   const state = loadState(group);
   state.sources ||= {};
-  const previousStatus = state.sources[sourceKey]?.status || null;
 
-  if (previousStatus === status) {
-    console.log(`[system] ${label}: unchanged (${status})`);
-    return;
-  }
-
-  const needsNotification = status === 'fail' || previousStatus === 'fail';
-  if (needsNotification && !DISCORD_WEBHOOK_URL) {
-    console.log(`[system] SYSTEM_DISCORD_WEBHOOK_URL is not configured. ${label} transition ${previousStatus || 'unknown'} -> ${status} remains pending.`);
-    return;
-  }
+  const previous = state.sources[sourceKey] || {};
+  const previousStatus = previous.status || null;
+  const runId = currentRunId();
+  const now = new Date().toISOString();
 
   if (status === 'fail') {
+    const previousFailures = failureCount(previous);
+    const sameRun = Boolean(runId && previous.lastFailureRunId === runId);
+    const consecutiveFailures = sameRun ? previousFailures : previousFailures + 1;
+
+    if (previousStatus === 'fail') {
+      console.log(`[system] ${label}: unchanged (fail)`);
+      return;
+    }
+
+    if (consecutiveFailures < FAILURE_THRESHOLD) {
+      state.sources[sourceKey] = {
+        ...previous,
+        consecutiveFailures,
+        lastFailureRunId: runId || previous.lastFailureRunId || null,
+        lastFailureAt: now
+      };
+      saveState(group, state);
+      console.log(`[system] ${label}: transient failure ${consecutiveFailures}/${FAILURE_THRESHOLD}; alert suppressed`);
+      return;
+    }
+
+    if (!DISCORD_WEBHOOK_URL) {
+      state.sources[sourceKey] = {
+        ...previous,
+        consecutiveFailures,
+        lastFailureRunId: runId || previous.lastFailureRunId || null,
+        lastFailureAt: now
+      };
+      saveState(group, state);
+      console.log(`[system] SYSTEM_DISCORD_WEBHOOK_URL is not configured. ${label} failure threshold reached; alert remains pending.`);
+      return;
+    }
+
     await postDiscord({
       ...baseEmbed(`🚨 수집 오류 · ${label}`),
-      description: truncate(detail || '재시도 후에도 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'),
+      description: truncate(detail || '여러 실행에서 연속으로 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'),
       fields: [
         { name: '그룹', value: group.toUpperCase(), inline: true },
-        { name: '상태', value: '오류', inline: true }
+        { name: '상태', value: '오류', inline: true },
+        { name: '연속 실패', value: `${consecutiveFailures}회`, inline: true }
       ]
     });
-  } else if (previousStatus === 'fail') {
+
+    state.sources[sourceKey] = {
+      ...previous,
+      status: 'fail',
+      changedAt: now,
+      consecutiveFailures,
+      lastFailureRunId: runId || previous.lastFailureRunId || null,
+      lastFailureAt: now
+    };
+    saveState(group, state);
+    console.log(`[system] ${label}: ${previousStatus || 'unknown'} -> fail after ${consecutiveFailures} consecutive runs`);
+    return;
+  }
+
+  const hadPendingFailures = failureCount(previous) > 0;
+
+  if (previousStatus === 'fail') {
+    if (!DISCORD_WEBHOOK_URL) {
+      console.log(`[system] SYSTEM_DISCORD_WEBHOOK_URL is not configured. ${label} recovery remains pending.`);
+      return;
+    }
+
     await postDiscord({
       ...baseEmbed(`✅ 복구 · ${label}`),
       description: '정상 수집이 다시 확인되었습니다.',
@@ -122,14 +188,35 @@ async function transition(group, sourceKey, status, label, detail = '') {
         { name: '상태', value: '정상', inline: true }
       ]
     });
+
+    state.sources[sourceKey] = {
+      ...clearPendingFailure(previous),
+      status: 'ok',
+      changedAt: now
+    };
+    saveState(group, state);
+    console.log(`[system] ${label}: fail -> ok`);
+    return;
   }
 
-  state.sources[sourceKey] = {
-    status,
-    changedAt: new Date().toISOString()
-  };
-  saveState(group, state);
-  console.log(`[system] ${label}: ${previousStatus || 'unknown'} -> ${status}`);
+  if (!previousStatus) {
+    state.sources[sourceKey] = {
+      status: 'ok',
+      changedAt: now
+    };
+    saveState(group, state);
+    console.log(`[system] ${label}: unknown -> ok`);
+    return;
+  }
+
+  if (hadPendingFailures) {
+    state.sources[sourceKey] = clearPendingFailure(previous);
+    saveState(group, state);
+    console.log(`[system] ${label}: recovered before alert threshold; pending failures reset`);
+    return;
+  }
+
+  console.log(`[system] ${label}: unchanged (ok)`);
 }
 
 async function incident(label, detail = '') {
