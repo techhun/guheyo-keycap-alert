@@ -36,13 +36,20 @@ final class MonitorPrefs {
         for (Map.Entry<String, String> entry : labels.entrySet()) {
             try { labelObject.put(entry.getKey(), entry.getValue()); } catch (Exception ignored) {}
         }
-        prefs(context).edit()
+
+        SharedPreferences preferences = prefs(context);
+        String nextIds = idArray.toString();
+        boolean targetChanged = !url.equals(preferences.getString(KEY_URL, ""))
+            || !nextIds.equals(preferences.getString(KEY_SELECTED_IDS, "[]"));
+
+        SharedPreferences.Editor editor = preferences.edit()
             .putString(KEY_URL, url)
             .putString(KEY_TITLE, title)
-            .putString(KEY_SELECTED_IDS, idArray.toString())
+            .putString(KEY_SELECTED_IDS, nextIds)
             .putString(KEY_SELECTED_LABELS, labelObject.toString())
-            .putInt(KEY_INTERVAL, intervalSeconds)
-            .apply();
+            .putInt(KEY_INTERVAL, intervalSeconds);
+        if (targetChanged) editor.remove(KEY_LAST_AVAILABILITY);
+        editor.apply();
     }
 
     static List<String> selectedIds(Context context) {
