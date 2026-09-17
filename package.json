@@ -14,7 +14,8 @@
     "system:health": "node scripts/system-health.mjs",
     "restock:bot": "node scripts/restock-bot.mjs",
     "restock:register": "node scripts/register-restock-commands.mjs",
-    "restock:probe": "node scripts/restock-local-probe.mjs"
+    "restock:probe": "node scripts/restock-local-probe.mjs",
+    "restock:probe:profile": "node scripts/restock-profile-probe.mjs"
   },
   "dependencies": {
     "discord.js": "14.27.0",
