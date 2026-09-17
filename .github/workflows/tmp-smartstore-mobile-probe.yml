@@ -19,4 +19,4 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Probe mobile SmartStore URL
-        run: npm run restock:probe -- "https://m.smartstore.naver.com/swagkey/products/12348949592"
+        run: xvfb-run -a npm run restock:probe -- "https://m.smartstore.naver.com/swagkey/products/12348949592"
