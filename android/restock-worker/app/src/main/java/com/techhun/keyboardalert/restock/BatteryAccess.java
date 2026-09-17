@@ -1,17 +1,20 @@
 package com.techhun.keyboardalert.restock;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.PowerManager;
+import android.os.Build;
 import android.provider.Settings;
 
 final class BatteryAccess {
     private BatteryAccess() {}
 
-    static boolean isOptimizationIgnored(Context context) {
-        PowerManager manager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        return manager != null && manager.isIgnoringBatteryOptimizations(context.getPackageName());
+    static boolean isBackgroundRestricted(Context context) {
+        if (Build.VERSION.SDK_INT < 28) return false;
+        ActivityManager manager =
+            (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        return manager != null && manager.isBackgroundRestricted();
     }
 
     static Intent settingsIntent(Context context) {
