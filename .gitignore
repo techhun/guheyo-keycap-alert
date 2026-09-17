@@ -9,5 +9,11 @@ node_modules/
 .restock-browser/
 restock-browser-profile/
 
+# Android local build files
+android/restock-worker/.gradle/
+android/restock-worker/.idea/
+android/restock-worker/local.properties
+android/restock-worker/**/build/
+
 # Local logs/runtime files
 *.log
