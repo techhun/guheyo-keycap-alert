@@ -64,15 +64,10 @@ jobs:
           if npm run check:dcinside; then
             :
           else
-            echo 'DCInside read failed once; retrying...'
-            if npm run check:dcinside; then
-              :
-            else
-              status=fail
-              echo 'DCInside is temporarily unavailable after retries. Keeping the previous verified state and continuing.'
-            fi
+            status=fail
+            echo 'DCInside is temporarily unavailable after its built-in retries. Keeping the previous verified state and continuing.'
           fi
-          npm run system:health -- transition fast dcinside "$status" '기키갤 떴냐' '2회 시도 후 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
+          npm run system:health -- transition fast dcinside "$status" '기키갤 떴냐' '내부 재시도 후에도 수집에 실패했습니다. 기존 검증된 state를 유지합니다.'
 
       - name: Persist fast watcher state
         if: always()
