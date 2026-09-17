@@ -74,6 +74,13 @@ public class MainActivity extends Activity {
             handler.postDelayed(this, 2500L);
         }
     };
+    private final Runnable resumeRefresh = () -> {
+        resumeMonitorIfNeeded();
+        if (refreshProductsOnResume) renderProducts();
+        refreshSessionButton();
+        handler.removeCallbacks(statusRefresh);
+        handler.postDelayed(statusRefresh, 2500L);
+    };
 
     private LinearLayout productList;
     private ScrollView productScroll;
@@ -93,6 +100,8 @@ public class MainActivity extends Activity {
     private boolean autoInspect;
     private boolean loginLaunching;
     private boolean optionLoadInProgress;
+    private boolean firstResume = true;
+    private boolean refreshProductsOnResume;
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -255,7 +264,7 @@ public class MainActivity extends Activity {
         ));
         TextView close = text("닫기", 14, SUB, Typeface.BOLD);
         close.setPadding(dp(12), dp(8), 0, dp(8));
-        close.setOnClickListener(v -> dialog.dismiss());
+        close.setOnClickListener(v -> Motion.dismissDialog(dialog, panel));
         Motion.press(close);
         header.addView(close);
 
@@ -324,8 +333,7 @@ public class MainActivity extends Activity {
         load.setOnClickListener(v -> {
             String url = input.getText().toString().trim();
             if (!isSmartStoreProductUrl(url)) return;
-            dialog.dismiss();
-            loadProductForEdit(url, null);
+            Motion.dismissDialog(dialog, panel, () -> loadProductForEdit(url, null));
         });
 
         dialog.setContentView(panel);
@@ -482,7 +490,7 @@ public class MainActivity extends Activity {
         ));
         TextView close = text("닫기", 14, SUB, Typeface.BOLD);
         close.setPadding(dp(12), dp(8), 0, dp(8));
-        close.setOnClickListener(v -> dialog.dismiss());
+        close.setOnClickListener(v -> Motion.dismissDialog(dialog, panel));
         Motion.press(close);
         header.addView(close);
 
@@ -577,7 +585,7 @@ public class MainActivity extends Activity {
                 optionsSnapshot
             )) {
                 committed[0] = true;
-                dialog.dismiss();
+                Motion.dismissDialog(dialog, panel, () -> renderProducts(true));
             }
         });
 
@@ -774,7 +782,6 @@ public class MainActivity extends Activity {
             product.put("productNo", productNo);
             ProductStore.upsert(this, product);
             clearPendingEdit();
-            renderProducts(true);
             return true;
         } catch (Exception e) {
             toast("저장하지 못했어요.");
@@ -1144,22 +1151,30 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override protected void onResume() {
-        super.onResume();
+    private void resumeMonitorIfNeeded() {
         if (ProductStore.enabledCount(this) > 0
             && hasNaverSession()
             && NotificationAccess.isAllowed(this)) {
-            // Starting an already-running service is safe and repairs stale
-            // persisted running state after process death or device reboot.
+            // Defer this work until the screen transition has settled so
+            // foreground-service startup and card rebuilding do not fight
+            // the animation frames.
             startForegroundService(new Intent(this, MonitorService.class));
         }
-        renderProducts();
-        refreshSessionButton();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
         handler.removeCallbacks(statusRefresh);
-        handler.post(statusRefresh);
+        handler.removeCallbacks(resumeRefresh);
+
+        refreshProductsOnResume = !firstResume;
+        long delay = firstResume ? 320L : 300L;
+        firstResume = false;
+        handler.postDelayed(resumeRefresh, delay);
     }
 
     @Override protected void onPause() {
+        handler.removeCallbacks(resumeRefresh);
         handler.removeCallbacks(statusRefresh);
         super.onPause();
     }
