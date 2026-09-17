@@ -231,6 +231,7 @@ public class SettingsActivity extends Activity {
         setContentView(scroll);
         root.requestApplyInsets();
         refreshNotificationStatus();
+        refreshBatteryStatus();
     }
 
     private void exportBackup() {
@@ -388,5 +389,6 @@ public class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshNotificationStatus();
+        refreshBatteryStatus();
     }
 }
