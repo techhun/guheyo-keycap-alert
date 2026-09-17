@@ -265,7 +265,7 @@ public class MainActivity extends Activity {
 
         LinearLayout field = new LinearLayout(this);
         field.setGravity(Gravity.CENTER_VERTICAL);
-        field.setPadding(dp(14), 0, dp(14), 0);
+        field.setPadding(dp(14), 0, dp(8), 0);
         field.setBackground(roundRect(FIELD, 14));
         panel.addView(field, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -280,25 +280,22 @@ public class MainActivity extends Activity {
         input.setHint("https://smartstore.naver.com/...");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         input.setBackgroundColor(Color.TRANSPARENT);
-        input.setPadding(0, 0, 0, 0);
+        input.setPadding(0, 0, dp(8), 0);
         field.addView(input, new LinearLayout.LayoutParams(
+            0,
             LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.MATCH_PARENT
+            1f
         ));
 
         String clipboardUrl = readClipboardSmartStoreUrl();
-        TextView pasteButton = text("클립보드에서 붙여넣기", 14, clipboardUrl.isBlank() ? SUB : BLUE, Typeface.BOLD);
-        pasteButton.setGravity(Gravity.CENTER);
-        pasteButton.setBackground(roundRect(clipboardUrl.isBlank() ? FIELD : BLUE_SOFT, 14));
-        pasteButton.setAlpha(clipboardUrl.isBlank() ? 0.72f : 1f);
-        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(48)
-        );
-        pasteLp.topMargin = dp(8);
-        panel.addView(pasteButton, pasteLp);
-        Motion.press(pasteButton);
-        pasteButton.setOnClickListener(v -> {
+        ImageView paste = new ImageView(this);
+        paste.setImageResource(R.drawable.ic_clipboard);
+        paste.setPadding(dp(9), dp(9), dp(9), dp(9));
+        paste.setColorFilter(clipboardUrl.isBlank() ? SUB : BLUE);
+        paste.setAlpha(clipboardUrl.isBlank() ? 0.55f : 1f);
+        field.addView(paste, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        Motion.press(paste);
+        paste.setOnClickListener(v -> {
             String value = readClipboardSmartStoreUrl();
             if (value.isBlank()) {
                 toast("클립보드에 SmartStore 상품 링크가 없어요.");
@@ -306,7 +303,7 @@ public class MainActivity extends Activity {
             }
             input.setText(value);
             input.setSelection(value.length());
-            Motion.selection(pasteButton);
+            Motion.selection(paste);
         });
 
         TextView load = text("상품 불러오기", 15, Color.WHITE, Typeface.BOLD);
