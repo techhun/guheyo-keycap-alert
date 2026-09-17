@@ -1,11 +1,11 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-17T11:20:51.359Z",
+  "updatedAt": "2026-09-17T11:30:44.545Z",
   "sources": {
     "geonworks-gb": {
-      "status": "fail",
-      "changedAt": "2026-09-17T11:20:51.359Z"
+      "status": "ok",
+      "changedAt": "2026-09-17T11:30:44.545Z"
     },
     "geonworks-release": {
       "status": "ok",
