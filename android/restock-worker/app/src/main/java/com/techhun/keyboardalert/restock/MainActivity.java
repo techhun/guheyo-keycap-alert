@@ -915,7 +915,7 @@ public class MainActivity extends Activity {
             MonitorPrefs.setRunning(this, false);
             return;
         }
-        if (!isRunning()) startForegroundService(new Intent(this, MonitorService.class));
+        startForegroundService(new Intent(this, MonitorService.class));
     }
 
     private void confirmDelete(JSONObject product) {
@@ -1141,7 +1141,11 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (ProductStore.enabledCount(this) > 0 && hasNaverSession() && !isRunning()) {
+        if (ProductStore.enabledCount(this) > 0
+            && hasNaverSession()
+            && NotificationAccess.isAllowed(this)) {
+            // Starting an already-running service is safe and repairs stale
+            // persisted running state after process death or device reboot.
             startForegroundService(new Intent(this, MonitorService.class));
         }
         renderProducts();
