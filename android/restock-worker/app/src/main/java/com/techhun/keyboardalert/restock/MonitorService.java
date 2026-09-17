@@ -32,39 +32,48 @@ import java.util.Set;
 
 public class MonitorService extends Service {
     static final String ACTION_STOP = "com.techhun.keyboardalert.restock.STOP";
+
     private static final String CHANNEL_MONITOR = "restock_monitor";
     private static final String CHANNEL_ALERT = "restock_alert";
     private static final int NOTIFICATION_MONITOR = 41001;
     private static final long RESULT_TIMEOUT_MS = 20_000L;
+    private static final long MIN_PRODUCT_SPACING_MS = 1_000L;
+
+    private enum Mode { BOOTSTRAP, DIRECT, DISCOVERY }
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;
     private PowerManager.WakeLock wakeLock;
     private JSONArray products = new JSONArray();
-    private JSONObject currentProduct;
     private int currentIndex;
-    private int successCount;
-    private int failureCount;
     private boolean awaitingResult;
     private boolean stopping;
+    private boolean bootstrapReady;
+    private Mode mode = Mode.BOOTSTRAP;
+    private JSONObject currentProduct;
 
     private final Runnable resultTimeout = () -> {
         if (!awaitingResult || stopping) return;
         awaitingResult = false;
+        String title = currentProduct == null ? "상품" : currentProduct.optString("title", "상품");
         markCurrentFailure("조회 시간 초과");
-        advanceProduct();
+        updateOngoingNotification(title + " · 조회 시간 초과");
+        scheduleNextProduct();
     };
 
-    @Override public void onCreate() {
+    @Override
+    public void onCreate() {
         super.onCreate();
         createNotificationChannels();
     }
 
-    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
             return START_NOT_STICKY;
         }
+
         stopping = false;
         products = ProductStore.list(this);
         if (products.length() == 0) {
@@ -72,22 +81,13 @@ public class MonitorService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+
         MonitorPrefs.setRunning(this, true);
         acquireWakeLock();
         startForeground(NOTIFICATION_MONITOR, buildOngoingNotification("감시 준비 중"));
         ensureWebView();
-        startCycle();
+        bootstrapSession();
         return START_STICKY;
-    }
-
-    private void startCycle() {
-        if (stopping) return;
-        products = ProductStore.list(this);
-        if (products.length() == 0) { stopSelf(); return; }
-        currentIndex = 0;
-        successCount = 0;
-        failureCount = 0;
-        loadCurrentProduct();
     }
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -102,160 +102,225 @@ public class MonitorService extends Service {
         settings.setUserAgentString(settings.getUserAgentString().replace("; wv)", ")").replace("Version/4.0 ", ""));
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+
         webView.addJavascriptInterface(new RestockBridge(), "RestockBridge");
         webView.setWebViewClient(new WebViewClient() {
-            @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                awaitingResult = false;
-                handler.removeCallbacks(resultTimeout);
-            }
-            @Override public void onPageFinished(WebView view, String url) {
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 if (stopping) return;
                 if (isLoginUrl(url)) {
-                    MonitorPrefs.updateStatus(MonitorService.this, "네이버 로그인 필요");
-                    updateOngoingNotification("로그인 필요 · 앱을 열어 로그인해주세요");
+                    setStatus("네이버 로그인 필요");
+                    updateOngoingNotification("로그인이 필요해요 · 앱을 열어주세요");
+                }
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (stopping) return;
+                if (isLoginUrl(url)) {
+                    setStatus("네이버 로그인 필요");
+                    updateOngoingNotification("로그인이 필요해요 · 앱에서 다시 로그인해주세요");
                     stopSelf();
                     return;
                 }
-                if (isProductUrl(url)) handler.postDelayed(MonitorService.this::runInventoryCheck, 800L);
-                else {
-                    markCurrentFailure("상품 페이지 연결 실패");
-                    advanceProduct();
+                if (!isProductUrl(url)) return;
+
+                if (mode == Mode.BOOTSTRAP && !bootstrapReady) {
+                    bootstrapReady = true;
+                    currentIndex = 0;
+                    handler.postDelayed(MonitorService.this::checkCurrentProduct, 600L);
+                } else if (mode == Mode.DISCOVERY) {
+                    handler.postDelayed(MonitorService.this::runDiscoveryCheck, 800L);
                 }
             }
         });
     }
 
-    private void loadCurrentProduct() {
-        if (stopping) return;
-        while (currentIndex < products.length()) {
-            currentProduct = products.optJSONObject(currentIndex);
-            if (currentProduct != null && ProductStore.selectedCount(currentProduct) > 0) break;
-            currentIndex++;
-        }
-        if (currentIndex >= products.length()) {
-            finishCycle();
+    private void bootstrapSession() {
+        JSONObject first = products.optJSONObject(0);
+        if (first == null) {
+            stopSelf();
             return;
         }
-        String title = currentProduct.optString("title", "상품");
-        updateOngoingNotification((currentIndex + 1) + "/" + products.length() + " · " + title);
-        awaitingResult = false;
-        handler.removeCallbacks(resultTimeout);
-        webView.loadUrl(currentProduct.optString("url"));
+        mode = Mode.BOOTSTRAP;
+        bootstrapReady = false;
+        updateOngoingNotification("SmartStore 세션 준비 중");
+        webView.loadUrl(first.optString("url"));
     }
 
-    private void runInventoryCheck() {
-        if (stopping || awaitingResult || currentProduct == null) return;
-        if (!isProductUrl(webView.getUrl())) {
-            markCurrentFailure("상품 페이지 연결 실패");
-            advanceProduct();
+    private void checkCurrentProduct() {
+        if (stopping || !bootstrapReady || products.length() == 0 || awaitingResult) return;
+        if (currentIndex >= products.length()) currentIndex = 0;
+        currentProduct = products.optJSONObject(currentIndex);
+        if (currentProduct == null) {
+            scheduleNextProduct();
             return;
         }
+
+        String title = currentProduct.optString("title", "상품");
+        String apiUrl = currentProduct.optString("apiUrl", "");
+        updateOngoingNotification(title + " · 재고 확인 중");
+
+        if (apiUrl.isBlank()) {
+            mode = Mode.DISCOVERY;
+            webView.loadUrl(currentProduct.optString("url"));
+            return;
+        }
+
+        mode = Mode.DIRECT;
+        awaitingResult = true;
+        handler.postDelayed(resultTimeout, RESULT_TIMEOUT_MS);
+        webView.evaluateJavascript(InventoryApiScript.build(currentProduct), ignored -> {});
+    }
+
+    private void runDiscoveryCheck() {
+        if (stopping || awaitingResult || currentProduct == null) return;
         awaitingResult = true;
         handler.postDelayed(resultTimeout, RESULT_TIMEOUT_MS);
         webView.evaluateJavascript(InventoryScript.SCRIPT, ignored -> {});
     }
 
     private class RestockBridge {
-        @JavascriptInterface public void onResult(String json) { handler.post(() -> handleInventoryResult(json)); }
+        @JavascriptInterface
+        public void onResult(String json) {
+            handler.post(() -> handleInventoryResult(json));
+        }
     }
 
     private void handleInventoryResult(String json) {
-        if (stopping || currentProduct == null) return;
+        if (stopping) return;
         awaitingResult = false;
         handler.removeCallbacks(resultTimeout);
+        if (currentProduct == null) {
+            scheduleNextProduct();
+            return;
+        }
+
         try {
             JSONObject result = new JSONObject(json);
             if (!result.optBoolean("ok", false)) {
-                String error = result.optString("error", "조회 실패");
-                if (result.has("status") && !result.isNull("status")) error += " · HTTP " + result.optInt("status");
-                markCurrentFailure(error);
-            } else {
-                processSuccessfulSnapshot(result);
-                successCount++;
+                String error = result.optString("error", "UNKNOWN");
+                int status = result.optInt("status", 0);
+                if (status == 401 || status == 403) {
+                    setStatus("네이버 로그인 필요");
+                    updateOngoingNotification("로그인이 필요해요 · 앱을 열어주세요");
+                    stopSelf();
+                    return;
+                }
+                markCurrentFailure("조회 실패 · " + error + (status > 0 ? " (HTTP " + status + ")" : ""));
+                scheduleNextProduct();
+                return;
             }
-        } catch (Exception e) {
+
+            if (mode == Mode.DISCOVERY) {
+                currentProduct.put("apiUrl", result.optString("apiUrl", ""));
+                currentProduct.put("channelUid", result.optString("channelUid", ""));
+                currentProduct.put("productNo", result.optString("productNo", ""));
+                if (!result.optString("title", "").isBlank()) currentProduct.put("title", result.optString("title"));
+            }
+
+            processSuccessfulSnapshot(currentProduct, result);
+            ProductStore.save(this, products);
+            scheduleNextProduct();
+        } catch (Exception error) {
             markCurrentFailure("결과 처리 실패");
+            scheduleNextProduct();
         }
-        advanceProduct();
     }
 
-    private void processSuccessfulSnapshot(JSONObject result) throws Exception {
-        JSONArray selectedIds = currentProduct.optJSONArray("selectedIds");
-        JSONObject labels = currentProduct.optJSONObject("selectedLabels");
-        if (selectedIds == null) selectedIds = new JSONArray();
-        if (labels == null) labels = new JSONObject();
+    private void processSuccessfulSnapshot(JSONObject product, JSONObject result) throws Exception {
+        JSONArray selectedArray = product.optJSONArray("selectedIds");
         Set<String> selected = new HashSet<>();
-        for (int i = 0; i < selectedIds.length(); i++) selected.add(selectedIds.optString(i));
+        if (selectedArray != null) for (int i = 0; i < selectedArray.length(); i++) selected.add(selectedArray.optString(i));
+        JSONObject configuredLabels = product.optJSONObject("selectedLabels");
+        if (configuredLabels == null) configuredLabels = new JSONObject();
 
         JSONArray options = result.optJSONArray("options");
         if (options == null) options = new JSONArray();
         Map<String, Boolean> current = new HashMap<>();
         Map<String, String> currentLabels = new HashMap<>();
-        int available = 0;
+        int availableCount = 0;
         for (int i = 0; i < options.length(); i++) {
             JSONObject option = options.optJSONObject(i);
             if (option == null) continue;
-            String id = option.optString("id");
+            String id = option.optString("id", "");
             if (!selected.contains(id)) continue;
-            boolean inStock = option.optBoolean("available", false);
-            current.put(id, inStock);
-            currentLabels.put(id, MainActivity.optionLabel(option));
-            if (inStock) available++;
+            boolean available = option.optBoolean("available", false);
+            current.put(id, available);
+            currentLabels.put(id, optionLabel(option));
+            if (available) availableCount++;
         }
 
-        JSONObject previous = currentProduct.optJSONObject("lastAvailability");
+        JSONObject previous = product.optJSONObject("lastAvailability");
         if (previous == null) previous = new JSONObject();
         JSONArray restocked = new JSONArray();
         for (String id : selected) {
-            if (!current.containsKey(id)) continue;
-            boolean now = current.get(id);
+            boolean now = current.getOrDefault(id, false);
             if (previous.has(id) && !previous.optBoolean(id, false) && now) {
-                restocked.put(currentLabels.getOrDefault(id, labels.optString(id, id)));
+                restocked.put(currentLabels.getOrDefault(id, configuredLabels.optString(id, id)));
             }
             previous.put(id, now);
         }
 
         String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date());
-        currentProduct.put("lastAvailability", previous);
-        currentProduct.put("lastStatus", "정상 · 재고 " + available + "/" + selected.size() + " · " + time);
-        currentProduct.put("lastCheck", System.currentTimeMillis());
-        products.put(currentIndex, currentProduct);
-        ProductStore.save(this, products);
+        String productStatus = "정상 · 재고 " + availableCount + "/" + selected.size() + " · " + time;
+        product.put("lastAvailability", previous);
+        product.put("lastStatus", productStatus);
+        product.put("lastCheck", System.currentTimeMillis());
 
-        if (restocked.length() > 0) notifyRestock(currentProduct.optString("title", "재입고"), currentProduct.optString("url"), restocked);
+        String globalStatus = "정상 · " + (currentIndex + 1) + "/" + products.length() + " 상품 · " + time;
+        MonitorPrefs.prefs(this).edit()
+            .putString(MonitorPrefs.KEY_LAST_STATUS, globalStatus)
+            .putLong(MonitorPrefs.KEY_LAST_CHECK, System.currentTimeMillis())
+            .apply();
+        updateOngoingNotification(product.optString("title", "상품") + " · " + productStatus);
+
+        if (restocked.length() > 0) {
+            notifyRestock(product.optString("title", "재입고"), product.optString("url", ""), restocked);
+        }
     }
 
-    private void markCurrentFailure(String reason) {
-        failureCount++;
-        try {
-            if (currentProduct != null) {
-                currentProduct.put("lastStatus", "조회 실패 · " + reason);
+    private void markCurrentFailure(String message) {
+        if (currentProduct != null) {
+            try {
+                currentProduct.put("lastStatus", message);
                 currentProduct.put("lastCheck", System.currentTimeMillis());
-                products.put(currentIndex, currentProduct);
                 ProductStore.save(this, products);
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        }
+        setStatus(message);
     }
 
-    private void advanceProduct() {
-        if (stopping) return;
-        currentIndex++;
-        handler.postDelayed(this::loadCurrentProduct, 500L);
+    private void scheduleNextProduct() {
+        if (stopping || products.length() == 0) return;
+        currentIndex = (currentIndex + 1) % products.length();
+        mode = Mode.DIRECT;
+        long spacing = Math.max(MIN_PRODUCT_SPACING_MS, MonitorPrefs.intervalSeconds(this) * 1000L / Math.max(1, products.length()));
+        handler.postDelayed(this::checkCurrentProduct, spacing);
     }
 
-    private void finishCycle() {
-        if (stopping) return;
-        String time = new SimpleDateFormat("HH:mm:ss", Locale.KOREA).format(new Date());
-        String status = failureCount == 0
-            ? "정상 · " + successCount + "개 상품 · " + time
-            : "완료 · 성공 " + successCount + " · 실패 " + failureCount + " · " + time;
+    private String optionLabel(JSONObject option) {
+        StringBuilder label = new StringBuilder();
+        for (String key : new String[]{"optionName1", "optionName2", "optionName3"}) {
+            String value = option.optString(key, "");
+            if (value.isBlank() || "null".equals(value)) continue;
+            if (label.length() > 0) label.append(" / ");
+            label.append(value);
+        }
+        return label.length() > 0 ? label.toString() : option.optString("id", "옵션");
+    }
+
+    private boolean isProductUrl(String url) {
+        return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
+    }
+
+    private boolean isLoginUrl(String url) {
+        return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login"));
+    }
+
+    private void setStatus(String status) {
         MonitorPrefs.updateStatus(this, status);
-        updateOngoingNotification(status);
-        handler.postDelayed(this::startCycle, MonitorPrefs.intervalSeconds(this) * 1000L);
     }
-
-    private boolean isProductUrl(String url) { return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/"); }
-    private boolean isLoginUrl(String url) { return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login")); }
 
     private void acquireWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) return;
@@ -268,8 +333,9 @@ public class MonitorService extends Service {
     private void createNotificationChannels() {
         NotificationManager manager = getSystemService(NotificationManager.class);
         NotificationChannel monitor = new NotificationChannel(CHANNEL_MONITOR, "재입고 감시 상태", NotificationManager.IMPORTANCE_LOW);
-        monitor.setDescription("재입고 감시 실행 상태");
+        monitor.setDescription("재입고 감시가 실행 중일 때 표시됩니다.");
         manager.createNotificationChannel(monitor);
+
         NotificationChannel alert = new NotificationChannel(CHANNEL_ALERT, "재입고 알림", NotificationManager.IMPORTANCE_HIGH);
         alert.setDescription("선택한 옵션이 재입고되면 알려줍니다.");
         alert.enableVibration(true);
@@ -277,50 +343,79 @@ public class MonitorService extends Service {
     }
 
     private PendingIntent openAppIntent() {
-        Intent intent = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private Notification buildOngoingNotification(String text) {
-        PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, MonitorService.class).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Intent stopIntent = new Intent(this, MonitorService.class).setAction(ACTION_STOP);
+        PendingIntent stop = PendingIntent.getService(this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL_MONITOR)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setContentTitle("Keyboard Restock · 감시 중")
             .setContentText(text)
             .setContentIntent(openAppIntent())
             .addAction(new Notification.Action.Builder(null, "감시 중지", stop).build())
-            .setOngoing(true).setOnlyAlertOnce(true).build();
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build();
     }
 
-    private void updateOngoingNotification(String text) { getSystemService(NotificationManager.class).notify(NOTIFICATION_MONITOR, buildOngoingNotification(text)); }
+    private void updateOngoingNotification(String text) {
+        getSystemService(NotificationManager.class).notify(NOTIFICATION_MONITOR, buildOngoingNotification(text));
+    }
 
-    private void notifyRestock(String title, String url, JSONArray labels) {
-        StringBuilder body = new StringBuilder();
-        for (int i = 0; i < labels.length(); i++) { if (i > 0) body.append(" · "); body.append(labels.optString(i)); }
-        Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        PendingIntent openProduct = PendingIntent.getActivity(this, Math.abs(url.hashCode()), open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    private void notifyRestock(String title, String productUrl, JSONArray labels) {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < labels.length(); i++) {
+            if (i > 0) text.append(" · ");
+            text.append(labels.optString(i));
+        }
+
+        Intent open = productUrl == null || productUrl.isBlank()
+            ? new Intent(this, MainActivity.class)
+            : new Intent(Intent.ACTION_VIEW, Uri.parse(productUrl));
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent contentIntent = PendingIntent.getActivity(
+            this,
+            Math.abs((title + productUrl).hashCode()),
+            open,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
         Notification notification = new Notification.Builder(this, CHANNEL_ALERT)
             .setSmallIcon(android.R.drawable.stat_notify_more)
             .setContentTitle("📦 재입고 · " + title)
-            .setContentText(body.toString())
-            .setStyle(new Notification.BigTextStyle().bigText(body.toString()))
-            .setContentIntent(openProduct)
+            .setContentText(text.toString())
+            .setStyle(new Notification.BigTextStyle().bigText(text.toString()))
+            .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .setDefaults(Notification.DEFAULT_ALL)
             .setCategory(Notification.CATEGORY_ALARM)
             .build();
-        getSystemService(NotificationManager.class).notify(42000 + Math.abs((title + body).hashCode() % 1000), notification);
+        getSystemService(NotificationManager.class).notify(42000 + Math.abs((title + text).hashCode() % 1000), notification);
     }
 
-    @Override public void onDestroy() {
+    @Override
+    public void onDestroy() {
         stopping = true;
         awaitingResult = false;
         handler.removeCallbacksAndMessages(null);
         MonitorPrefs.setRunning(this, false);
-        if (webView != null) { webView.removeJavascriptInterface("RestockBridge"); webView.stopLoading(); webView.destroy(); webView = null; }
+        if (webView != null) {
+            webView.removeJavascriptInterface("RestockBridge");
+            webView.stopLoading();
+            webView.destroy();
+            webView = null;
+        }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
-    @Override public IBinder onBind(Intent intent) { return null; }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
 }
