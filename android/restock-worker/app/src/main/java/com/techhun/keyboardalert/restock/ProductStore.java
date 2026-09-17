@@ -2,16 +2,21 @@ package com.techhun.keyboardalert.restock;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class ProductStore {
     static final String KEY_PRODUCTS = "products_v2";
     private static final Pattern PRODUCT_ID = Pattern.compile("/products/(\\d+)");
+    private static final String BACKUP_FORMAT = "restock-backup";
+    private static final int BACKUP_VERSION = 1;
 
     private ProductStore() {}
 
@@ -28,24 +33,10 @@ final class ProductStore {
                 changed = true;
             }
             if (changed) save(context, products);
-            return enabledFirst(products);
+            return products;
         } catch (Exception ignored) {
             return new JSONArray();
         }
-    }
-
-    private static JSONArray enabledFirst(JSONArray products) {
-        JSONArray ordered = new JSONArray();
-        for (int pass = 0; pass < 2; pass++) {
-            boolean targetEnabled = pass == 0;
-            for (int i = 0; i < products.length(); i++) {
-                JSONObject product = products.optJSONObject(i);
-                if (product != null && product.optBoolean("enabled", false) == targetEnabled) {
-                    ordered.put(product);
-                }
-            }
-        }
-        return ordered;
     }
 
     static JSONArray enabledList(Context context) {
@@ -110,6 +101,15 @@ final class ProductStore {
     }
 
     static void setEnabled(Context context, String id, boolean enabled) {
+        if (enabled && !NotificationAccess.isAllowed(context)) {
+            Toast.makeText(
+                context,
+                "알림 권한을 먼저 허용해주세요. 설정에서 알림 권한을 확인할 수 있어요.",
+                Toast.LENGTH_SHORT
+            ).show();
+            return;
+        }
+
         JSONArray products = list(context);
         for (int i = 0; i < products.length(); i++) {
             JSONObject product = products.optJSONObject(i);
@@ -179,6 +179,81 @@ final class ProductStore {
         return ids == null ? 0 : ids.length();
     }
 
+    static String exportBackup(Context context) throws Exception {
+        JSONObject root = new JSONObject();
+        root.put("format", BACKUP_FORMAT);
+        root.put("version", BACKUP_VERSION);
+        root.put("intervalSeconds", MonitorPrefs.intervalSeconds(context));
+
+        JSONArray exported = new JSONArray();
+        JSONArray products = list(context);
+        for (int i = 0; i < products.length(); i++) {
+            JSONObject source = products.optJSONObject(i);
+            if (source == null) continue;
+            JSONObject item = new JSONObject();
+            copyIfPresent(source, item, "id");
+            copyIfPresent(source, item, "url");
+            copyIfPresent(source, item, "title");
+            copyIfPresent(source, item, "selectedIds");
+            copyIfPresent(source, item, "selectedLabels");
+            copyIfPresent(source, item, "apiUrl");
+            copyIfPresent(source, item, "channelUid");
+            copyIfPresent(source, item, "productNo");
+            item.put("enabled", source.optBoolean("enabled", false));
+            exported.put(item);
+        }
+        root.put("products", exported);
+        return root.toString(2);
+    }
+
+    static int importBackup(Context context, String json) throws Exception {
+        JSONObject root = new JSONObject(json);
+        if (!BACKUP_FORMAT.equals(root.optString("format", ""))) {
+            throw new IllegalArgumentException("지원하지 않는 백업 파일입니다.");
+        }
+        JSONArray source = root.optJSONArray("products");
+        if (source == null) throw new IllegalArgumentException("상품 목록이 없습니다.");
+
+        boolean canEnable = NotificationAccess.isAllowed(context);
+        JSONArray imported = new JSONArray();
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < source.length(); i++) {
+            JSONObject item = source.optJSONObject(i);
+            if (item == null) continue;
+            String url = item.optString("url", "").trim();
+            if (!isSupportedProductUrl(url)) continue;
+
+            JSONArray ids = item.optJSONArray("selectedIds");
+            if (ids == null || ids.length() == 0) continue;
+            String id = item.optString("id", "").trim();
+            if (id.isBlank()) id = idFromUrl(url);
+            if (!seen.add(id)) continue;
+
+            JSONObject restored = new JSONObject();
+            restored.put("id", id);
+            restored.put("url", url);
+            restored.put("title", item.optString("title", "SmartStore 상품"));
+            restored.put("selectedIds", new JSONArray(ids.toString()));
+            JSONObject labels = item.optJSONObject("selectedLabels");
+            restored.put("selectedLabels", labels == null ? new JSONObject() : new JSONObject(labels.toString()));
+            restored.put("apiUrl", item.optString("apiUrl", ""));
+            restored.put("channelUid", item.optString("channelUid", ""));
+            restored.put("productNo", item.optString("productNo", ""));
+            boolean enabled = item.optBoolean("enabled", false) && canEnable;
+            restored.put("enabled", enabled);
+            restored.put("lastAvailability", new JSONObject());
+            restored.put("lastStatus", enabled ? "준비 중" : "");
+            restored.put("lastCheck", 0L);
+            imported.put(restored);
+        }
+
+        int interval = root.optInt("intervalSeconds", MonitorPrefs.intervalSeconds(context));
+        if (interval != 15 && interval != 30 && interval != 60) interval = 30;
+        MonitorPrefs.prefs(context).edit().putInt(MonitorPrefs.KEY_INTERVAL, interval).apply();
+        save(context, imported);
+        return imported.length();
+    }
+
     static void migrateLegacyIfNeeded(Context context) {
         SharedPreferences prefs = MonitorPrefs.prefs(context);
         if (prefs.contains(KEY_PRODUCTS)) return;
@@ -203,6 +278,12 @@ final class ProductStore {
             } catch (Exception ignored) {}
         }
         prefs.edit().putString(KEY_PRODUCTS, products.toString()).apply();
+    }
+
+    private static boolean isSupportedProductUrl(String url) {
+        return url.startsWith("https://")
+            && url.contains("smartstore.naver.com/")
+            && url.contains("/products/");
     }
 
     private static void preserveRuntime(JSONObject oldProduct, JSONObject next) {
