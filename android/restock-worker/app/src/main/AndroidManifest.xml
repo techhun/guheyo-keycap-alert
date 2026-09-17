@@ -10,7 +10,9 @@
     <application
         android:allowBackup="false"
         android:hardwareAccelerated="true"
-        android:label="Keyboard Restock"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="재입고 알림"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
