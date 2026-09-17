@@ -18,11 +18,9 @@ public class BootReceiver extends BroadcastReceiver {
             MonitorPrefs.updateStatus(context, "알림 권한 필요");
             return;
         }
-        if (!SessionState.hasNaverSession()) {
-            MonitorPrefs.updateStatus(context, "로그인 필요");
-            return;
-        }
-
+        // Let MonitorService verify the real SmartStore session after boot.
+        // CookieManager can be slow to expose persisted cookies immediately
+        // after process start, so a cookie-only gate here can skip a valid session.
         try {
             context.startForegroundService(new Intent(context, MonitorService.class));
         } catch (RuntimeException error) {
