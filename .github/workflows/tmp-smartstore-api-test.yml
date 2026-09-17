@@ -1,0 +1,140 @@
+name: Temporary SmartStore direct API probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-smartstore-api-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Probe SmartStore internal JSON APIs
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/probe.mjs" <<'EOF'
+          const stores = [
+            { slug: 'swagkey', productId: '12348949592' },
+            { slug: 'geonlab', productId: '13233558774' }
+          ];
+
+          const variants = [
+            {
+              name: 'plain',
+              headers: {
+                accept: 'application/json, text/plain, */*',
+                'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'cache-control': 'no-cache',
+                pragma: 'no-cache'
+              }
+            },
+            {
+              name: 'browser',
+              headers: {
+                accept: 'application/json, text/plain, */*',
+                'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'content-type': 'application/json',
+                'cache-control': 'no-cache',
+                pragma: 'no-cache',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                'x-client-version': '20251223161333',
+                'sec-fetch-dest': 'empty',
+                'sec-fetch-mode': 'cors',
+                'sec-fetch-site': 'same-origin'
+              }
+            }
+          ];
+
+          const clip = (s, n = 180) => String(s || '').replace(/\s+/g, ' ').slice(0, n);
+
+          async function fetchOne(url, headers, referer) {
+            const response = await fetch(url, {
+              redirect: 'follow',
+              headers: { ...headers, ...(referer ? { referer } : {}) }
+            });
+            const text = await response.text();
+            let json = null;
+            try { json = JSON.parse(text); } catch {}
+            return {
+              status: response.status,
+              finalUrl: response.url,
+              contentType: response.headers.get('content-type'),
+              server: response.headers.get('server'),
+              len: text.length,
+              json,
+              preview: json ? null : clip(text)
+            };
+          }
+
+          for (const store of stores) {
+            for (const variant of variants) {
+              for (const host of ['smartstore.naver.com', 'm.smartstore.naver.com']) {
+                const resolver = `https://${host}/i/v1/smart-stores?url=${encodeURIComponent(store.slug)}`;
+                try {
+                  const r = await fetchOne(resolver, variant.headers, `https://${host}/${store.slug}`);
+                  const channel = r.json?.channel ?? r.json;
+                  const uid = channel?.channelUid || channel?.channelId || null;
+                  console.log(JSON.stringify({
+                    kind: 'resolver', variant: variant.name, host, store: store.slug,
+                    status: r.status, contentType: r.contentType, len: r.len,
+                    uid, channelId: channel?.id ?? null, mallSeq: channel?.mallSeq ?? null,
+                    channelName: channel?.channelName ?? null, preview: r.preview
+                  }, null, 0));
+
+                  if (!uid || r.status < 200 || r.status >= 300) continue;
+                  const productUrl = `https://${host}/i/v2/channels/${uid}/products/${store.productId}?withWindow=false`;
+                  const p = await fetchOne(productUrl, variant.headers, `https://${host}/${store.slug}/products/${store.productId}`);
+                  console.log(JSON.stringify({
+                    kind: 'product', variant: variant.name, host, store: store.slug,
+                    productId: store.productId, uid, status: p.status,
+                    contentType: p.contentType, len: p.len,
+                    id: p.json?.id ?? null,
+                    productNo: p.json?.productNo ?? null,
+                    name: p.json?.name ?? null,
+                    stockQuantity: p.json?.stockQuantity ?? null,
+                    statusType: p.json?.statusType ?? p.json?.productStatusType ?? null,
+                    optionCombinations: Array.isArray(p.json?.optionCombinations) ? p.json.optionCombinations.length : null,
+                    options: Array.isArray(p.json?.options) ? p.json.options.length : null,
+                    preview: p.preview
+                  }, null, 0));
+                } catch (error) {
+                  console.log(JSON.stringify({ kind: 'error', variant: variant.name, host, store: store.slug, error: String(error?.stack || error) }));
+                }
+              }
+            }
+          }
+          EOF
+          node "$RUNNER_TEMP/probe.mjs"
+
+  cleanup:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/tmp-smartstore-api-test.yml
+          git commit -m 'Remove temporary SmartStore direct API probe [skip ci]'
+          for attempt in 1 2 3; do
+            if git pull --rebase origin main && git push origin main; then
+              exit 0
+            fi
+            git rebase --abort >/dev/null 2>&1 || true
+            sleep $((attempt * 2))
+          done
+          exit 1
