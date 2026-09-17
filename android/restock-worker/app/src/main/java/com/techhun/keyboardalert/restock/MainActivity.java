@@ -136,13 +136,17 @@ public class MainActivity extends Activity {
         sessionButton.setGravity(Gravity.CENTER);
         sessionButton.setPadding(dp(14), dp(9), dp(14), dp(9));
         sessionButton.setOnClickListener(v -> handleSessionAction());
+        Motion.press(sessionButton);
         topRow.addView(sessionButton);
 
         ImageView settings = new ImageView(this);
         settings.setImageResource(R.drawable.ic_settings);
         settings.setColorFilter(TEXT);
         settings.setPadding(dp(10), dp(10), dp(10), dp(10));
-        settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+        settings.setOnClickListener(v ->
+            Motion.push(this, new Intent(this, SettingsActivity.class))
+        );
+        Motion.press(settings);
         LinearLayout.LayoutParams settingsLp = new LinearLayout.LayoutParams(dp(42), dp(42));
         settingsLp.leftMargin = dp(4);
         topRow.addView(settings, settingsLp);
@@ -155,6 +159,7 @@ public class MainActivity extends Activity {
         TextView add = text("+ 상품 추가", 15, BLUE, Typeface.BOLD);
         add.setPadding(dp(12), dp(8), 0, dp(8));
         add.setOnClickListener(v -> showAddProductDialog());
+        Motion.press(add);
         addRow.addView(add);
 
         productScroll = new ScrollView(this);
@@ -191,7 +196,9 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         root.requestApplyInsets();
-        renderProducts();
+        Motion.enter(topRow, 0L);
+        Motion.enter(addRow, 45L);
+        renderProducts(true);
     }
 
     private void handleSessionAction() {
@@ -249,6 +256,7 @@ public class MainActivity extends Activity {
         TextView close = text("닫기", 14, SUB, Typeface.BOLD);
         close.setPadding(dp(12), dp(8), 0, dp(8));
         close.setOnClickListener(v -> dialog.dismiss());
+        Motion.press(close);
         header.addView(close);
 
         TextView label = text("SmartStore 상품 주소", 13, SUB, Typeface.NORMAL);
@@ -287,6 +295,7 @@ public class MainActivity extends Activity {
         String clipboardUrl = readClipboardSmartStoreUrl();
         paste.setColorFilter(clipboardUrl.isBlank() ? SUB : BLUE);
         paste.setAlpha(clipboardUrl.isBlank() ? 0.55f : 1f);
+        Motion.press(paste);
         paste.setOnClickListener(v -> {
             String value = readClipboardSmartStoreUrl();
             if (value.isBlank()) {
@@ -308,6 +317,7 @@ public class MainActivity extends Activity {
             );
             hintLp.topMargin = dp(8);
             panel.addView(clipboardHint, hintLp);
+            Motion.press(clipboardHint);
             clipboardHint.setOnClickListener(v -> {
                 input.setText(clipboardUrl);
                 input.setSelection(clipboardUrl.length());
@@ -328,6 +338,7 @@ public class MainActivity extends Activity {
             }
             @Override public void afterTextChanged(Editable s) {}
         });
+        Motion.press(load);
         load.setOnClickListener(v -> {
             String url = input.getText().toString().trim();
             if (!isSmartStoreProductUrl(url)) return;
@@ -340,6 +351,7 @@ public class MainActivity extends Activity {
         dialog.setOnDismissListener(d -> addDialog = null);
         dialog.show();
         sizeDialog(dialog, 0.92f);
+        Motion.dialogIn(panel);
     }
 
     private String readClipboardSmartStoreUrl() {
@@ -489,6 +501,7 @@ public class MainActivity extends Activity {
         TextView close = text("닫기", 14, SUB, Typeface.BOLD);
         close.setPadding(dp(12), dp(8), 0, dp(8));
         close.setOnClickListener(v -> dialog.dismiss());
+        Motion.press(close);
         header.addView(close);
 
         TextView productName = text(titleSnapshot, 13, SUB, Typeface.NORMAL);
@@ -543,6 +556,8 @@ public class MainActivity extends Activity {
             dp(390)
         ));
 
+        Motion.press(allChip);
+        Motion.press(selectedChip);
         allChip.setOnClickListener(v -> {
             selectedOnly[0] = false;
             renderOptionList(optionList, optionsSnapshot, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
@@ -567,6 +582,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams saveLp = matchWrap();
         saveLp.topMargin = dp(10);
         panel.addView(save, saveLp);
+        Motion.press(save);
         save.setOnClickListener(v -> {
             if (saveProductSelection(
                 checked,
@@ -592,6 +608,7 @@ public class MainActivity extends Activity {
         });
         dialog.show();
         sizeDialog(dialog, 0.94f);
+        Motion.dialogIn(panel);
     }
 
     private void renderOptionList(
@@ -654,6 +671,7 @@ public class MainActivity extends Activity {
                 ));
                 TextView arrow = text(collapsed ? "›" : "⌄", 20, SUB, Typeface.NORMAL);
                 groupRow.addView(arrow);
+                Motion.press(groupRow);
                 groupRow.setOnClickListener(v -> {
                     if (collapsedGroups.contains(group)) collapsedGroups.remove(group);
                     else collapsedGroups.add(group);
@@ -695,6 +713,7 @@ public class MainActivity extends Activity {
                 mark.setGravity(Gravity.CENTER);
                 mark.setPadding(dp(12), 0, 0, 0);
                 row.addView(mark);
+                Motion.press(row);
                 row.setOnClickListener(v -> {
                     checked[index] = !checked[index];
                     renderOptionList(container, options, checked, search, selectedOnly, collapsedGroups, selectedCount, allChip, selectedChip);
@@ -773,7 +792,7 @@ public class MainActivity extends Activity {
             product.put("productNo", productNo);
             ProductStore.upsert(this, product);
             clearPendingEdit();
-            renderProducts();
+            renderProducts(true);
             return true;
         } catch (Exception e) {
             toast("저장하지 못했어요.");
@@ -793,6 +812,10 @@ public class MainActivity extends Activity {
     }
 
     private void renderProducts() {
+        renderProducts(false);
+    }
+
+    private void renderProducts(boolean animate) {
         if (productList == null) return;
         int oldScroll = productScroll == null ? 0 : productScroll.getScrollY();
         productList.removeAllViews();
@@ -803,6 +826,7 @@ public class MainActivity extends Activity {
             value.setGravity(Gravity.CENTER);
             empty.addView(value);
             productList.addView(empty, sectionParams());
+            if (animate) Motion.enter(empty, 20L);
             return;
         }
 
@@ -813,6 +837,7 @@ public class MainActivity extends Activity {
 
             LinearLayout card = surface(20, 16);
             productList.addView(card, sectionParams());
+            if (animate) Motion.enter(card, 35L + Math.min(i, 6) * 34L);
 
             LinearLayout titleRow = new LinearLayout(this);
             titleRow.setGravity(Gravity.TOP);
@@ -839,6 +864,7 @@ public class MainActivity extends Activity {
             TextView delete = text("삭제", 12, RED, Typeface.BOLD);
             delete.setPadding(dp(9), dp(5), 0, dp(5));
             delete.setOnClickListener(v -> confirmDelete(product));
+            Motion.press(delete);
             titleRow.addView(delete);
 
             Map<String, String> labels = labelMap(product.optJSONObject("selectedLabels"));
@@ -900,7 +926,7 @@ public class MainActivity extends Activity {
 
         ProductStore.setEnabled(this, id, enable);
         syncMonitorService();
-        renderProducts();
+        renderProducts(true);
         if (productScroll != null) productScroll.post(() -> productScroll.smoothScrollTo(0, 0));
     }
 
@@ -921,7 +947,7 @@ public class MainActivity extends Activity {
             .setPositiveButton("삭제", (d, w) -> {
                 ProductStore.remove(this, product.optString("id"));
                 syncMonitorService();
-                renderProducts();
+                renderProducts(true);
             })
             .show();
     }
@@ -941,7 +967,7 @@ public class MainActivity extends Activity {
         loginLaunching = true;
         Intent intent = new Intent(this, LoginActivity.class);
         intent.putExtra(LoginActivity.EXTRA_TARGET_URL, targetUrl);
-        startActivityForResult(intent, REQUEST_LOGIN);
+        Motion.pushForResult(this, intent, REQUEST_LOGIN);
     }
 
     @Override
@@ -964,7 +990,7 @@ public class MainActivity extends Activity {
             ProductStore.setEnabled(this, pendingEnableProductId, true);
             pendingEnableProductId = null;
             syncMonitorService();
-            renderProducts();
+            renderProducts(true);
         }
 
         if (!pendingUrl.isBlank() && optionLoadInProgress) {
@@ -1102,7 +1128,7 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams rowParams(float weight, int left) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(43), weight);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(46), weight);
         params.leftMargin = dp(left);
         return params;
     }
@@ -1121,6 +1147,7 @@ public class MainActivity extends Activity {
         button.setTranslationZ(0f);
         button.setStateListAnimator(null);
         button.setPadding(dp(12), 0, dp(12), 0);
+        Motion.press(button);
         return button;
     }
 
