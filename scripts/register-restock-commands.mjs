@@ -21,6 +21,36 @@ const commands = [
   {
     name: '입고목록',
     description: '현재 재입고 감시 목록을 확인하고 삭제합니다.'
+  },
+  {
+    name: '감시시작',
+    description: '재입고 감시를 지금부터 수동으로 시작합니다.'
+  },
+  {
+    name: '감시중지',
+    description: '재입고 감시를 중지하고 예약을 해제합니다.'
+  },
+  {
+    name: '감시상태',
+    description: '현재 재입고 감시 상태와 예약 시간을 확인합니다.'
+  },
+  {
+    name: '감시예약',
+    description: '한국시간 기준으로 재입고 감시 시작/종료 시간을 예약합니다.',
+    options: [
+      {
+        type: 3,
+        name: '시작',
+        description: '예: 2026-09-20 19:50 또는 09-20 19:50',
+        required: true
+      },
+      {
+        type: 3,
+        name: '종료',
+        description: '예: 2026-09-20 22:00 또는 09-20 22:00',
+        required: true
+      }
+    ]
   }
 ];
 
