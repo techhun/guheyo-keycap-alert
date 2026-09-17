@@ -4,14 +4,21 @@ const input = process.argv[2] || 'https://smartstore.naver.com/swagkey/products/
 
 function parseTarget(value) {
   const url = new URL(value);
+  const allowedHosts = new Set(['smartstore.naver.com', 'm.smartstore.naver.com']);
+  if (!allowedHosts.has(url.hostname)) {
+    throw new Error('SmartStore 호스트가 아닙니다: smartstore.naver.com 또는 m.smartstore.naver.com');
+  }
+
   const match = url.pathname.match(/^\/([^/]+)\/products\/(\d+)\/?$/);
   if (!match) {
-    throw new Error('SmartStore 상품 URL 형식이 아닙니다: https://smartstore.naver.com/{store}/products/{productNo}');
+    throw new Error('SmartStore 상품 URL 형식이 아닙니다: https://{m.}smartstore.naver.com/{store}/products/{productNo}');
   }
+
   return {
     store: match[1],
     productNo: match[2],
-    canonicalUrl: `https://smartstore.naver.com/${match[1]}/products/${match[2]}`
+    origin: url.origin,
+    canonicalUrl: `${url.origin}/${match[1]}/products/${match[2]}`
   };
 }
 
