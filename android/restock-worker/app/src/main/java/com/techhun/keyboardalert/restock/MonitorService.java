@@ -9,6 +9,9 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -38,8 +41,11 @@ public class MonitorService extends Service {
 
     private static final String CHANNEL_MONITOR = "restock_monitor";
     private static final String CHANNEL_ALERT = "restock_alert";
+    private static final String CHANNEL_STATUS = "restock_status";
     private static final int NOTIFICATION_MONITOR = 41001;
+    private static final int NOTIFICATION_STATUS = 41002;
     private static final long RESULT_TIMEOUT_MS = 20_000L;
+    private static final long NETWORK_RETRY_MS = 30_000L;
     private static final long MIN_PRODUCT_SPACING_MS = 1_000L;
     private static final long INITIAL_RATE_LIMIT_BACKOFF_MS = 30_000L;
     private static final long MAX_RATE_LIMIT_BACKOFF_MS = 5 * 60_000L;
@@ -94,6 +100,7 @@ public class MonitorService extends Service {
         }
 
         MonitorPrefs.setRunning(this, true);
+        getSystemService(NotificationManager.class).cancel(NOTIFICATION_STATUS);
         acquireWakeLock();
         Notification ongoing = buildOngoingNotification(products.length() + "개 알림 켜짐");
         if (Build.VERSION.SDK_INT >= 29) {
@@ -179,6 +186,12 @@ public class MonitorService extends Service {
         if (!NotificationAccess.isAllowed(this)) {
             setStatus("알림 권한 필요");
             stopSelf();
+            return;
+        }
+        if (!isNetworkAvailable()) {
+            setStatus("네트워크 연결 대기");
+            updateOngoingNotification("네트워크 연결을 기다리는 중");
+            handler.postDelayed(this::checkCurrentProduct, NETWORK_RETRY_MS);
             return;
         }
         if (currentIndex >= products.length()) currentIndex = 0;
@@ -282,7 +295,10 @@ public class MonitorService extends Service {
                 }
             }
 
-            processSuccessfulSnapshot(currentProduct, result);
+            if (!processSuccessfulSnapshot(currentProduct, result)) {
+                scheduleNextProduct();
+                return;
+            }
             ProductStore.updateRuntime(this, currentProduct);
             scheduleNextProduct();
         } catch (Exception error) {
@@ -291,12 +307,17 @@ public class MonitorService extends Service {
         }
     }
 
-    private void processSuccessfulSnapshot(JSONObject product, JSONObject result) throws Exception {
+    private boolean processSuccessfulSnapshot(JSONObject product, JSONObject result) throws Exception {
         JSONArray selectedArray = product.optJSONArray("selectedIds");
         Set<String> selected = new HashSet<>();
         if (selectedArray != null) {
             for (int i = 0; i < selectedArray.length(); i++) selected.add(selectedArray.optString(i));
         }
+        if (selected.isEmpty()) {
+            markCurrentFailure("선택 옵션 없음");
+            return false;
+        }
+
         JSONObject configuredLabels = product.optJSONObject("selectedLabels");
         if (configuredLabels == null) configuredLabels = new JSONObject();
 
@@ -314,6 +335,14 @@ public class MonitorService extends Service {
             current.put(id, available);
             currentLabels.put(id, optionLabel(option));
             if (available) availableCount++;
+        }
+
+        // A successful HTTP response is not a verified inventory snapshot when
+        // one or more configured options are missing. Preserve the last known
+        // state instead of treating missing options as sold out.
+        if (current.size() != selected.size()) {
+            markCurrentFailure("선택 옵션 확인 실패");
+            return false;
         }
 
         JSONObject previous = product.optJSONObject("lastAvailability");
@@ -342,6 +371,7 @@ public class MonitorService extends Service {
         if (restocked.length() > 0) {
             notifyRestock(product.optString("title", "재입고"), product.optString("url", ""), restocked);
         }
+        return true;
     }
 
     private void applyRateLimitBackoff() {
@@ -362,7 +392,7 @@ public class MonitorService extends Service {
     private void invalidateSessionAndStop() {
         if (stopping) return;
         setStatus("로그인 필요");
-        updateOngoingNotification("앱에서 다시 로그인해주세요");
+        notifyLoginRequired();
         CookieManager cookies = CookieManager.getInstance();
         cookies.removeAllCookies(value -> cookies.flush());
         WebStorage.getInstance().deleteAllData();
@@ -420,6 +450,17 @@ public class MonitorService extends Service {
         MonitorPrefs.updateStatus(this, status);
     }
 
+    private boolean isNetworkAvailable() {
+        ConnectivityManager manager =
+            (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (manager == null) return true;
+        Network network = manager.getActiveNetwork();
+        if (network == null) return false;
+        NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
+        return capabilities != null
+            && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
     private void acquireWakeLock() {
         if (wakeLock != null && wakeLock.isHeld()) return;
         PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
@@ -444,6 +485,13 @@ public class MonitorService extends Service {
         );
         alert.enableVibration(true);
         manager.createNotificationChannel(alert);
+
+        NotificationChannel status = new NotificationChannel(
+            CHANNEL_STATUS,
+            "Restock 상태 알림",
+            NotificationManager.IMPORTANCE_DEFAULT
+        );
+        manager.createNotificationChannel(status);
     }
 
     private PendingIntent openAppIntent() {
@@ -473,6 +521,18 @@ public class MonitorService extends Service {
             NOTIFICATION_MONITOR,
             buildOngoingNotification(text)
         );
+    }
+
+    private void notifyLoginRequired() {
+        Notification notification = new Notification.Builder(this, CHANNEL_STATUS)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("Restock · 로그인 필요")
+            .setContentText("재입고 감시를 계속하려면 다시 로그인해주세요.")
+            .setContentIntent(openAppIntent())
+            .setAutoCancel(true)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .build();
+        getSystemService(NotificationManager.class).notify(NOTIFICATION_STATUS, notification);
     }
 
     private void notifyRestock(String title, String productUrl, JSONArray labels) {
