@@ -19,6 +19,7 @@ import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -40,6 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity {
+    private static final int REQUEST_LOGIN = 9001;
     private static final int[] INTERVAL_VALUES = {15, 30, 60};
     private static final String[] INTERVAL_LABELS = {"15초", "30초", "60초"};
     private static final int BG = Color.rgb(247, 248, 250);
@@ -62,7 +64,6 @@ public class MainActivity extends Activity {
     };
 
     private LinearLayout productList;
-    private LinearLayout loginPanel;
     private TextView statusTitle;
     private TextView statusDetail;
     private TextView[] intervalChips;
@@ -71,9 +72,13 @@ public class MainActivity extends Activity {
 
     private JSONArray latestOptions = new JSONArray();
     private String latestTitle = "";
+    private String latestApiUrl = "";
+    private String latestChannelUid = "";
+    private String latestProductNo = "";
     private String pendingUrl = "";
     private String editingProductId = null;
     private boolean autoInspect;
+    private boolean loginLaunching;
     private int intervalSeconds = 30;
 
     @Override
@@ -129,6 +134,9 @@ public class MainActivity extends Activity {
         LinearLayout settings = surface(20, 18);
         content.addView(settings, sectionParams());
         settings.addView(text("조회 주기", 13, SUB, Typeface.NORMAL));
+        TextView intervalHint = text("상품이 여러 개면 이 주기 안에서 요청을 나눠서 확인해요.", 12, SUB, Typeface.NORMAL);
+        intervalHint.setPadding(0, dp(4), 0, 0);
+        settings.addView(intervalHint);
         LinearLayout intervalRow = new LinearLayout(this);
         intervalRow.setPadding(0, dp(10), 0, 0);
         settings.addView(intervalRow, matchWrap());
@@ -151,29 +159,31 @@ public class MainActivity extends Activity {
         monitorButton.setOnClickListener(v -> { if (isRunning()) stopMonitoring(); else startMonitoring(); });
         settings.addView(monitorButton, topParams(16));
 
-        loginPanel = surface(20, 16);
-        loginPanel.setVisibility(View.GONE);
-        content.addView(loginPanel, sectionParams());
-        LinearLayout loginHeader = new LinearLayout(this);
-        loginHeader.setGravity(Gravity.CENTER_VERTICAL);
-        loginPanel.addView(loginHeader);
-        loginHeader.addView(text("네이버 로그인", 18, TEXT, Typeface.BOLD), new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView close = text("닫기", 14, BLUE, Typeface.BOLD);
-        close.setPadding(dp(12), dp(8), 0, dp(8));
-        close.setOnClickListener(v -> loginPanel.setVisibility(View.GONE));
-        loginHeader.addView(close);
-        TextView hint = text("로그인 세션이 필요할 때만 이 화면이 나타나요.", 12, SUB, Typeface.NORMAL);
-        hint.setPadding(0, dp(5), 0, dp(10));
-        loginPanel.addView(hint);
+        sectionHeading(content, "로그인 관리");
+        LinearLayout loginSettings = surface(20, 18);
+        content.addView(loginSettings, sectionParams());
+        loginSettings.addView(text("네이버 세션", 16, TEXT, Typeface.BOLD));
+        TextView loginHint = text("로그인이 풀리면 전체화면 로그인으로 전환돼요. 아래 삭제는 이 앱의 로그인만 지워요.", 13, SUB, Typeface.NORMAL);
+        loginHint.setPadding(0, dp(6), 0, dp(12));
+        loginSettings.addView(loginHint);
+        LinearLayout loginActions = new LinearLayout(this);
+        loginSettings.addView(loginActions, matchWrap());
+        Button relogin = softButton("다시 로그인");
+        relogin.setOnClickListener(v -> openLoginForExistingProduct());
+        loginActions.addView(relogin, rowParams(1f, 0));
+        Button clearLogin = softRedButton("로그인 정보 삭제");
+        clearLogin.setOnClickListener(v -> confirmClearLogin());
+        loginActions.addView(clearLogin, rowParams(1f, 8));
 
+        // 내부 조회 엔진. 사용자 화면에는 표시하지 않는다.
         webView = new WebView(this);
         configureWebView(webView);
+        webView.setVisibility(View.INVISIBLE);
         webView.addJavascriptInterface(new InventoryBridge(), "RestockBridge");
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageFinished(WebView view, String url) {
                 if (isLoginUrl(url)) {
-                    loginPanel.setVisibility(View.VISIBLE);
-                    Toast.makeText(MainActivity.this, "네이버 로그인 후 상품 페이지로 돌아오면 자동으로 이어져요.", Toast.LENGTH_LONG).show();
+                    if (!pendingUrl.isBlank()) launchLogin(pendingUrl);
                     return;
                 }
                 if (isProductUrl(url) && autoInspect) {
@@ -182,7 +192,8 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        loginPanel.addView(webView, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(500)));
+        LinearLayout.LayoutParams hiddenParams = new LinearLayout.LayoutParams(dp(1), dp(1));
+        content.addView(webView, hiddenParams);
 
         setContentView(scroll);
         renderProducts();
@@ -214,6 +225,9 @@ public class MainActivity extends Activity {
         pendingUrl = url;
         editingProductId = id;
         latestOptions = new JSONArray();
+        latestApiUrl = "";
+        latestChannelUid = "";
+        latestProductNo = "";
         autoInspect = true;
         webView.loadUrl(url);
         toast("상품 옵션을 불러오는 중이에요.");
@@ -231,11 +245,18 @@ public class MainActivity extends Activity {
     private void handleInventory(String json) {
         try {
             JSONObject result = new JSONObject(json);
-            if (!result.optBoolean("ok")) { toast("옵션 조회에 실패했어요. 다시 시도해주세요."); return; }
+            if (!result.optBoolean("ok")) {
+                String error = result.optString("error", "UNKNOWN");
+                if ("PRODUCT_API_FAILED".equals(error) && !pendingUrl.isBlank()) launchLogin(pendingUrl);
+                else toast("옵션 조회에 실패했어요. 다시 시도해주세요.");
+                return;
+            }
             latestTitle = result.optString("title", "SmartStore 상품");
             latestOptions = result.optJSONArray("options");
+            latestApiUrl = result.optString("apiUrl", "");
+            latestChannelUid = result.optString("channelUid", "");
+            latestProductNo = result.optString("productNo", "");
             if (latestOptions == null || latestOptions.length() == 0) { toast("선택 가능한 옵션이 없어요."); return; }
-            loginPanel.setVisibility(View.GONE);
             showOptionPicker();
         } catch (Exception e) {
             toast("상품 정보를 처리하지 못했어요.");
@@ -258,6 +279,7 @@ public class MainActivity extends Activity {
             rows[i] = optionLabel(option) + "  ·  " + (stock > 0 ? stock + "개" : stock == 0 ? "품절" : "재고 ?");
             checked[i] = saved.contains(id);
         }
+
         new AlertDialog.Builder(this)
             .setTitle(latestTitle)
             .setMultiChoiceItems(rows, checked, (d, which, value) -> checked[which] = value)
@@ -286,6 +308,9 @@ public class MainActivity extends Activity {
             product.put("title", latestTitle);
             product.put("selectedIds", ids);
             product.put("selectedLabels", labels);
+            product.put("apiUrl", latestApiUrl);
+            product.put("channelUid", latestChannelUid);
+            product.put("productNo", latestProductNo);
             ProductStore.upsert(this, product);
             editingProductId = null;
             pendingUrl = "";
@@ -301,8 +326,7 @@ public class MainActivity extends Activity {
         JSONArray products = ProductStore.list(this);
         if (products.length() == 0) {
             LinearLayout empty = surface(20, 18);
-            TextView t = text("아직 감시할 상품이 없어요", 16, TEXT, Typeface.BOLD);
-            empty.addView(t);
+            empty.addView(text("아직 감시할 상품이 없어요", 16, TEXT, Typeface.BOLD));
             TextView s = text("오른쪽 위의 + 상품 추가에서 시작하세요.", 13, SUB, Typeface.NORMAL);
             s.setPadding(0, dp(5), 0, 0);
             empty.addView(s);
@@ -314,8 +338,7 @@ public class MainActivity extends Activity {
             if (product == null) continue;
             LinearLayout card = surface(20, 18);
             productList.addView(card, sectionParams());
-            TextView name = text(product.optString("title", "SmartStore 상품"), 17, TEXT, Typeface.BOLD);
-            card.addView(name);
+            card.addView(text(product.optString("title", "SmartStore 상품"), 17, TEXT, Typeface.BOLD));
             Map<String, String> labels = labelMap(product.optJSONObject("selectedLabels"));
             String optionSummary;
             if (labels.isEmpty()) optionSummary = "선택 옵션 없음";
@@ -324,7 +347,7 @@ public class MainActivity extends Activity {
             TextView options = text(optionSummary, 13, SUB, Typeface.NORMAL);
             options.setPadding(0, dp(6), 0, 0);
             card.addView(options);
-            String last = product.optString("lastStatus", "대기 중");
+            String last = product.optString("lastStatus", product.optString("apiUrl", "").isBlank() ? "첫 감시 때 빠른 조회 정보를 준비해요" : "대기 중");
             TextView state = text(last, 12, SUB, Typeface.NORMAL);
             state.setPadding(0, dp(7), 0, dp(12));
             card.addView(state);
@@ -347,6 +370,60 @@ public class MainActivity extends Activity {
             .setNegativeButton("취소", null)
             .setPositiveButton("삭제", (d, w) -> { ProductStore.remove(this, product.optString("id")); renderProducts(); })
             .show();
+    }
+
+    private void openLoginForExistingProduct() {
+        JSONArray products = ProductStore.list(this);
+        if (products.length() == 0) { toast("상품을 하나 추가하면 로그인 상태를 확인할 수 있어요."); return; }
+        JSONObject first = products.optJSONObject(0);
+        if (first == null) return;
+        launchLogin(first.optString("url"));
+    }
+
+    private void launchLogin(String targetUrl) {
+        if (loginLaunching || targetUrl == null || targetUrl.isBlank()) return;
+        loginLaunching = true;
+        Intent intent = new Intent(this, LoginActivity.class);
+        intent.putExtra(LoginActivity.EXTRA_TARGET_URL, targetUrl);
+        startActivityForResult(intent, REQUEST_LOGIN);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_LOGIN) return;
+        loginLaunching = false;
+        if (resultCode == RESULT_OK) {
+            toast("로그인됐어요.");
+            if (!pendingUrl.isBlank()) {
+                autoInspect = true;
+                webView.loadUrl(pendingUrl);
+            }
+        }
+    }
+
+    private void confirmClearLogin() {
+        if (isRunning()) { toast("감시를 중지한 뒤 로그인 정보를 삭제해주세요."); return; }
+        new AlertDialog.Builder(this)
+            .setTitle("앱 로그인 정보 삭제")
+            .setMessage("Keyboard Restock 안에 저장된 네이버 로그인만 삭제할까요?\nChrome이나 삼성 인터넷 로그인에는 영향이 없어요.")
+            .setNegativeButton("취소", null)
+            .setPositiveButton("삭제", (d, w) -> clearAppLogin())
+            .show();
+    }
+
+    private void clearAppLogin() {
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.removeAllCookies(value -> {
+            cookies.flush();
+            WebStorage.getInstance().deleteAllData();
+            if (webView != null) {
+                webView.clearCache(true);
+                webView.clearHistory();
+                webView.loadUrl("about:blank");
+            }
+            runOnUiThread(() -> toast("이 앱의 네이버 로그인 정보를 삭제했어요."));
+        });
     }
 
     private void startMonitoring() {
@@ -447,5 +524,5 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() { super.onResume(); renderProducts(); handler.removeCallbacks(statusRefresh); handler.post(statusRefresh); }
     @Override protected void onPause() { handler.removeCallbacks(statusRefresh); super.onPause(); }
-    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); if (webView != null) { webView.removeJavascriptInterface("RestockBridge"); webView.destroy(); } super.onDestroy(); }
+    @Override protected void onDestroy() { handler.removeCallbacksAndMessages(null); if (webView != null) { webView.removeJavascriptInterface("RestockBridge"); webView.stopLoading(); webView.destroy(); } super.onDestroy(); }
 }
