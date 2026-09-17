@@ -74,6 +74,7 @@ public class LoginActivity extends Activity {
         close.setTextColor(Color.rgb(49, 130, 246));
         close.setGravity(Gravity.CENTER_VERTICAL);
         close.setOnClickListener(v -> finish());
+        Motion.press(close);
         header.addView(close, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.MATCH_PARENT
@@ -114,6 +115,7 @@ public class LoginActivity extends Activity {
 
         setContentView(root);
         root.requestApplyInsets();
+        Motion.enter(header, 0L);
 
         String loginUrl = "https://nid.naver.com/nidlogin.login?url=" + Uri.encode(targetUrl);
         webView.loadUrl(loginUrl);
@@ -272,6 +274,12 @@ public class LoginActivity extends Activity {
     public void onBackPressed() {
         if (webView != null && webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
+        Motion.pop(this);
     }
 
     @Override
