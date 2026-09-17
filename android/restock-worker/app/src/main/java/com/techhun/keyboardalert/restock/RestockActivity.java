@@ -1,6 +1,5 @@
 package com.techhun.keyboardalert.restock;
 
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -9,8 +8,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
-import android.webkit.CookieManager;
-import android.webkit.WebStorage;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -37,10 +34,10 @@ public class RestockActivity extends MainActivity {
             routeToGate();
             return;
         }
-        decorateHeader();
+        decorateBrand();
     }
 
-    private void decorateHeader() {
+    private void decorateBrand() {
         View content = findViewById(android.R.id.content);
         if (!(content instanceof ViewGroup contentGroup) || contentGroup.getChildCount() == 0) return;
         View rootView = contentGroup.getChildAt(0);
@@ -51,9 +48,12 @@ public class RestockActivity extends MainActivity {
         View iconView = header.getChildAt(0);
         if (iconView instanceof ImageView icon) {
             icon.setImageResource(R.drawable.restock_icon);
-            LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(42), dp(42));
-            icon.setLayoutParams(iconLp);
+            icon.setLayoutParams(new LinearLayout.LayoutParams(dp(42), dp(42)));
         }
+
+        if (header.getChildCount() > 1
+            && header.getChildAt(1) instanceof TextView existing
+            && "Restock".contentEquals(existing.getText())) return;
 
         TextView brand = new TextView(this);
         brand.setText("Restock");
@@ -66,35 +66,6 @@ public class RestockActivity extends MainActivity {
         );
         brandLp.leftMargin = dp(10);
         header.addView(brand, 1, brandLp);
-
-        // Header order after insertion: icon, brand, spacer, logout, settings.
-        View sessionView = header.getChildAt(3);
-        if (sessionView instanceof TextView logout) {
-            logout.setText("로그아웃");
-            logout.setOnClickListener(v -> confirmLogout());
-        }
-    }
-
-    private void confirmLogout() {
-        new AlertDialog.Builder(this)
-            .setTitle("로그아웃할까요?")
-            .setMessage("켜진 재입고 알림도 함께 꺼져요.")
-            .setNegativeButton("취소", null)
-            .setPositiveButton("로그아웃", (dialog, which) -> logout())
-            .show();
-    }
-
-    private void logout() {
-        ProductStore.disableAll(this);
-        startService(new Intent(this, MonitorService.class).setAction(MonitorService.ACTION_STOP));
-        MonitorPrefs.setRunning(this, false);
-
-        CookieManager cookies = CookieManager.getInstance();
-        cookies.removeAllCookies(value -> {
-            cookies.flush();
-            WebStorage.getInstance().deleteAllData();
-            runOnUiThread(this::routeToGate);
-        });
     }
 
     private void routeToGate() {
@@ -121,7 +92,6 @@ public class RestockActivity extends MainActivity {
     @Override
     protected void onPause() {
         sessionHandler.removeCallbacks(sessionCheck);
-        if (!SessionState.hasNaverSession() && !isFinishing()) routeToGate();
         super.onPause();
     }
 
