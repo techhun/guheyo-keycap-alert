@@ -3,7 +3,6 @@ package com.techhun.keyboardalert.restock;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -11,6 +10,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.LinearLayout;
@@ -22,6 +22,7 @@ public class LoginActivity extends Activity {
 
     private WebView webView;
     private String targetUrl;
+    private boolean completing;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +67,6 @@ public class LoginActivity extends Activity {
         close.setText("닫기");
         close.setTextSize(15f);
         close.setTextColor(Color.rgb(49, 130, 246));
-        close.setTypeface(null, Typeface.BOLD);
         close.setGravity(Gravity.CENTER_VERTICAL);
         close.setOnClickListener(v -> finish());
         header.addView(close, new LinearLayout.LayoutParams(
@@ -78,13 +78,20 @@ public class LoginActivity extends Activity {
         MainActivity.configureWebView(webView);
         webView.setWebViewClient(new WebViewClient() {
             @Override
-            public void onPageFinished(WebView view, String url) {
-                if (isLoginUrl(url)) return;
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                String url = request.getUrl().toString();
                 if (loginCompleted(url)) {
-                    Intent result = new Intent();
-                    result.putExtra(EXTRA_TARGET_URL, targetUrl);
-                    setResult(RESULT_OK, result);
-                    finish();
+                    completeLogin();
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                if (loginCompleted(url)) {
+                    view.stopLoading();
+                    completeLogin();
                 }
             }
         });
@@ -101,6 +108,15 @@ public class LoginActivity extends Activity {
         webView.loadUrl(loginUrl);
     }
 
+    private void completeLogin() {
+        if (completing) return;
+        completing = true;
+        Intent result = new Intent();
+        result.putExtra(EXTRA_TARGET_URL, targetUrl);
+        setResult(RESULT_OK, result);
+        finish();
+    }
+
     private boolean loginCompleted(String url) {
         if (url == null || !url.contains("smartstore.naver.com")) return false;
         if (targetUrl.contains("/products/")) return isProductUrl(url);
@@ -109,10 +125,6 @@ public class LoginActivity extends Activity {
 
     private boolean isProductUrl(String url) {
         return url != null && url.contains("smartstore.naver.com/") && url.contains("/products/");
-    }
-
-    private boolean isLoginUrl(String url) {
-        return url != null && (url.contains("nid.naver.com") || url.contains("nidlogin.login"));
     }
 
     private int dp(int value) {
