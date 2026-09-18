@@ -131,10 +131,14 @@ async function extractRoadmap(page) {
   });
   await page.waitForTimeout(700);
 
-  // Notion virtualizes collection views. Even after every quarter has at least one
-  // visible row, that can still be only a partial viewport. Scan the whole page
-  // repeatedly and retain the longest clean list observed for each quarter.
-  for (let step = 0; step < 72; step += 1) {
+  // Notion virtualizes collection views. Scan only until the bottom is reached
+  // and the verified quarter snapshot stops growing, instead of always doing 72 passes.
+  let stableScans = 0;
+  let previousTotal = 0;
+  let scanCount = 0;
+
+  for (let step = 0; step < 48; step += 1) {
+    scanCount = step + 1;
     const found = await page.evaluate(() => {
       const tidy = (value) => String(value ?? '').replace(/\r/g, '').trim();
       const invalid = /^(?:불러오는 중(?:\.{3})?|loading(?:\.{3})?|결과 없음|no results|문제 발생|다시 시도하기|something went wrong|try again)$/i;
@@ -166,22 +170,32 @@ async function extractRoadmap(page) {
       if (quarters[quarter] === null || products.length > quarters[quarter].length) quarters[quarter] = products;
     }
 
-    const resetScroll = (step + 1) % 24 === 0;
-    const scrollState = await page.evaluate((shouldReset) => {
+    const currentTotal = Object.values(quarters)
+      .filter(Array.isArray)
+      .reduce((sum, products) => sum + products.length, 0);
+    stableScans = currentTotal === previousTotal ? stableScans + 1 : 0;
+    previousTotal = currentTotal;
+
+    const scrollState = await page.evaluate(() => {
       const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
-      if (shouldReset) {
-        scroller.scrollTop = 0;
-      } else {
-        const distance = Math.max(900, Math.floor((scroller.clientHeight || window.innerHeight || 900) * 0.8));
-        scroller.scrollTop = Math.min(scroller.scrollTop + distance, scroller.scrollHeight);
-      }
+      const distance = Math.max(900, Math.floor((scroller.clientHeight || window.innerHeight || 900) * 0.8));
+      const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const before = scroller.scrollTop;
+      scroller.scrollTop = Math.min(before + distance, scroller.scrollHeight);
       return {
         top: scroller.scrollTop,
-        max: Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+        max,
+        moved: scroller.scrollTop > before + 5
       };
-    }, resetScroll);
-    await page.waitForTimeout(!resetScroll && scrollState.max > 0 && scrollState.top >= scrollState.max - 5 ? 1200 : 500);
+    });
+
+    const atBottom = scrollState.max === 0 || scrollState.top >= scrollState.max - 5 || !scrollState.moved;
+    if (atBottom && stableScans >= 2 && quarterSnapshotIsValid(quarters)) break;
+
+    await page.waitForTimeout(atBottom ? 900 : 450);
   }
+
+  console.log(`SWAGKEYS roadmap scan passes: ${scanCount}`);
 
   if (!quarterSnapshotIsValid(quarters)) {
     const missing = QUARTERS.filter((quarter) => !Array.isArray(quarters[quarter]) || quarters[quarter].length === 0);
