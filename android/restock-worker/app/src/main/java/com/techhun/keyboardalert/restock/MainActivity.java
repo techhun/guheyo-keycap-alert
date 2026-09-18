@@ -131,7 +131,7 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setClipChildren(false);
+        root.setClipChildren(true);
         root.setClipToPadding(false);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int top;
@@ -199,13 +199,22 @@ public class MainActivity extends Activity {
             1f
         ));
 
+        FrameLayout cardViewport = new FrameLayout(this);
+        cardViewport.setClipChildren(true);
+        cardViewport.setClipToPadding(true);
+        productArea.addView(cardViewport, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+
         productScroll = new ScrollView(this);
         productScroll.setFillViewport(true);
-        productScroll.setClipToPadding(false);
+        productScroll.setClipChildren(true);
+        productScroll.setClipToPadding(true);
         productScroll.setPadding(0, 0, 0, dp(12));
         productScroll.setVerticalScrollBarEnabled(false);
         productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        productArea.addView(productScroll, new FrameLayout.LayoutParams(
+        cardViewport.addView(productScroll, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ));
