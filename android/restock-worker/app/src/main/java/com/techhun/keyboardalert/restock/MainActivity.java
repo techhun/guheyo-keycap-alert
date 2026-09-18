@@ -131,7 +131,7 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setClipChildren(true);
+        root.setClipChildren(false);
         root.setClipToPadding(false);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int top;
