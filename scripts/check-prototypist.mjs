@@ -29,6 +29,7 @@ const truncate = (value, maxLength = 1000) => {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isNotionChallengeTitle = (value) => /just a moment|잠시만 기다리십시오/i.test(String(value || ''));
 const DETAIL_TIMEOUT_MS = 12000;
 const FALLBACK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
@@ -56,14 +57,14 @@ async function extractPage(page, source) {
 
   await page.waitForFunction((statuses) => {
     const title = document.title || '';
-    if (/just a moment/i.test(title)) return true;
+    if (isNotionChallengeTitle(title)) return true;
 
     const body = document.body?.innerText || '';
     const statusCount = statuses.filter((status) => body.includes(status)).length;
     return statusCount >= 4 && document.querySelectorAll('a').length >= 5;
   }, STATUSES, { timeout: 25000 }).catch(() => {});
 
-  if (/just a moment/i.test(await page.title())) {
+  if (isNotionChallengeTitle(await page.title())) {
     throw new Error(`${source.label} was blocked by the Notion challenge page`);
   }
 
@@ -250,7 +251,7 @@ async function extractDetailNote(context, row) {
 
   try {
     await page.goto(row.itemUrl, { waitUntil: 'domcontentloaded', timeout: DETAIL_TIMEOUT_MS });
-    if (/just a moment/i.test(await page.title())) throw new Error('blocked by the Notion challenge page');
+    if (isNotionChallengeTitle(await page.title())) throw new Error('blocked by the Notion challenge page');
     await page.waitForTimeout(800);
 
     return await page.evaluate(({ product, statuses }) => {
