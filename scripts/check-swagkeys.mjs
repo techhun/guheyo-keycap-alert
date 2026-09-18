@@ -106,9 +106,11 @@ async function extractRoadmap(page) {
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
   }
   await page.waitForFunction(() => {
+    if (/just a moment|잠시만 기다리십시오/i.test(document.title || '')) return true;
     const note = document.querySelector('[role="note"]') || document.querySelector('.notion-callout-block');
     return /업데이트\s*\(/.test(note?.innerText || '');
   }, undefined, { timeout: 20000 });
+  if (isNotionChallengeTitle(await page.title())) throw new Error('blocked by the Notion challenge page');
   await page.waitForTimeout(500);
 
   const announcement = await page.evaluate(() => {
@@ -136,6 +138,7 @@ async function extractRoadmap(page) {
   // Notion virtualizes collection views. Scan only until the bottom is reached
   // and the verified quarter snapshot stops growing, instead of always doing 72 passes.
   let stableScans = 0;
+  let zeroDataScans = 0;
   let previousTotal = 0;
   let scanCount = 0;
 
@@ -176,7 +179,12 @@ async function extractRoadmap(page) {
       .filter(Array.isArray)
       .reduce((sum, products) => sum + products.length, 0);
     stableScans = currentTotal === previousTotal ? stableScans + 1 : 0;
+    zeroDataScans = currentTotal === 0 ? zeroDataScans + 1 : 0;
     previousTotal = currentTotal;
+
+    if (zeroDataScans >= 8) {
+      throw new Error('quarter roadmap product rows did not render');
+    }
 
     const scrollState = await page.evaluate(() => {
       const scroller = document.querySelector('.notion-scroller.vertical') || document.scrollingElement || document.documentElement;
@@ -193,6 +201,9 @@ async function extractRoadmap(page) {
 
     const atBottom = scrollState.max === 0 || scrollState.top >= scrollState.max - 5 || !scrollState.moved;
     if (atBottom && stableScans >= 2 && quarterSnapshotIsValid(quarters)) break;
+    if (atBottom && stableScans >= 5 && !quarterSnapshotIsValid(quarters)) {
+      throw new Error('quarter roadmap stopped changing before all quarters rendered');
+    }
 
     await page.waitForTimeout(atBottom ? 900 : 450);
   }
@@ -209,7 +220,11 @@ async function extractRoadmap(page) {
 }
 
 async function extractRows(page) {
-  await page.waitForFunction(() => document.querySelectorAll('.notion-table-view-row').length >= 10, undefined, { timeout: 25000 });
+  await page.waitForFunction(() => {
+    if (/just a moment|잠시만 기다리십시오/i.test(document.title || '')) return true;
+    return document.querySelectorAll('.notion-table-view-row').length >= 10;
+  }, undefined, { timeout: 25000 });
+  if (isNotionChallengeTitle(await page.title())) throw new Error('blocked by the Notion challenge page');
   await page.waitForTimeout(1000);
   return page.evaluate(() => {
     const tidy = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
