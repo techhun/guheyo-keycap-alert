@@ -230,8 +230,7 @@ async function fetchSnapshot(fallback = {}) {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 1800, height: 1400 },
-    locale: 'ko-KR',
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+    locale: 'ko-KR'
   });
   try {
     let roadmap = null;
