@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export function clean(value) {
   return String(value ?? '')
     .replace(/\r/g, '')
@@ -163,4 +165,21 @@ export function changeSignature(changes) {
     }
     return JSON.stringify({ kind: change.kind, product, row: stableRow(change.row) });
   }).sort().join('\n');
+}
+
+
+export function changeId(change) {
+  return createHash('sha256')
+    .update(changeSignature([change]))
+    .digest('hex')
+    .slice(0, 24);
+}
+
+export function pruneSentChanges(sentChanges = {}, nowMs = Date.now(), maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+  const result = {};
+  for (const [id, timestamp] of Object.entries(sentChanges || {})) {
+    const time = Date.parse(timestamp);
+    if (id && Number.isFinite(time) && nowMs - time < maxAgeMs) result[id] = timestamp;
+  }
+  return result;
 }
