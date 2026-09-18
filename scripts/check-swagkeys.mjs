@@ -28,6 +28,7 @@ const truncate = (value, maxLength = 1000) => {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const isNotionChallengeTitle = (value) => /just a moment|잠시만 기다리십시오/i.test(String(value || ''));
 const FALLBACK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 
@@ -83,7 +84,7 @@ async function openWithRetry(context, url, label, extractor) {
     const page = await context.newPage();
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      if (/just a moment/i.test(await page.title())) throw new Error('blocked by the Notion challenge page');
+      if (isNotionChallengeTitle(await page.title())) throw new Error('blocked by the Notion challenge page');
       const result = await extractor(page);
       console.log(`SWAGKEYS ${label} read successfully on attempt ${attempt}.`);
       return result;
