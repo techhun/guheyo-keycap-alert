@@ -38,8 +38,14 @@ function truncate(value, maxLength = 1000) {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+function comparableValue(value) {
+  const text = clean(value);
+  if (!text || /^(?:—|–|-)$/u.test(text)) return '';
+  return text;
+}
+
 function normalizeKey(value) {
-  return clean(value).toLocaleLowerCase('en-US');
+  return comparableValue(value).toLocaleLowerCase('en-US');
 }
 
 function displayValue(label, value) {
@@ -270,7 +276,7 @@ function diffRows(previousRows, currentRows) {
     }
 
     const fields = COMPARED_FIELDS
-      .filter((field) => clean(before[field]) !== clean(row[field]))
+      .filter((field) => comparableValue(before[field]) !== comparableValue(row[field]))
       .map((field) => ({
         field,
         label: FIELD_LABELS[field],
