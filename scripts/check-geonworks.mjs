@@ -57,8 +57,7 @@ async function fetchRows() {
   try {
     const page = await browser.newPage({
       viewport: { width: 1440, height: 1600 },
-      locale: 'ko-KR',
-      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130 Safari/537.36'
+      locale: 'ko-KR'
     });
 
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
