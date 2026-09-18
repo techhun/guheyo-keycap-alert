@@ -199,14 +199,6 @@ public class MainActivity extends Activity {
             1f
         ));
 
-        FrameLayout cardViewport = new FrameLayout(this);
-        cardViewport.setClipChildren(true);
-        cardViewport.setClipToPadding(true);
-        productArea.addView(cardViewport, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ));
-
         productScroll = new ScrollView(this);
         productScroll.setFillViewport(true);
         productScroll.setClipChildren(true);
@@ -214,7 +206,7 @@ public class MainActivity extends Activity {
         productScroll.setPadding(0, 0, 0, dp(12));
         productScroll.setVerticalScrollBarEnabled(false);
         productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        cardViewport.addView(productScroll, new FrameLayout.LayoutParams(
+        productArea.addView(productScroll, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ));
