@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright';
-import { bulkChangeInfo, changeSignature, clean, comparableValue, normalizeKey, parseGbGvizResponse, validateGbRows } from './geonworks-safety.mjs';
+import { bulkChangeInfo, changeId, changeSignature, clean, comparableValue, normalizeKey, pruneSentChanges, parseGbGvizResponse, validateGbRows } from './geonworks-safety.mjs';
 
 const PAGE_URL = 'https://geonworks.kr/customhtml/GB_schedule.html';
 const DATA_URL = 'https://docs.google.com/spreadsheets/d/1i9SK14aWxpElXrjMinidKjVCXDi1XXBQSZJVB7ocbJk/gviz/tq?tqx=out:json&sheet=GB%20Schedule';
@@ -111,14 +111,15 @@ function loadState() {
   }
 }
 
-function saveState(rows) {
+function saveState(rows, sentChanges = {}) {
   fs.writeFileSync(
     STATE_PATH,
     JSON.stringify({
       version: 1,
       initialized: true,
       updatedAt: new Date().toISOString(),
-      rows
+      rows,
+      sentChanges: pruneSentChanges(sentChanges)
     }, null, 2) + '\n'
   );
 }
@@ -261,10 +262,11 @@ console.log('GEONWORKS sample:', JSON.stringify(rows[0], null, 2));
 
 const state = loadState();
 const previousRows = Array.isArray(state?.rows) ? state.rows : [];
+let sentChanges = pruneSentChanges(state?.sentChanges || {});
 
 if (!state?.initialized || previousRows.length === 0) {
   console.log(`Baseline initialization: storing ${rows.length} GEONWORKS rows without notifying.`);
-  saveState(rows);
+  saveState(rows, sentChanges);
   process.exit(0);
 }
 
@@ -315,8 +317,14 @@ for (const change of changes) {
 }
 
 if (changes.length === 0) {
+  if (JSON.stringify(sentChanges) !== JSON.stringify(state?.sentChanges || {})) saveState(previousRows, sentChanges);
   console.log('No GEONWORKS state update needed.');
   process.exit(0);
+}
+
+const pendingChanges = changes.filter((change) => !sentChanges[changeId(change)]);
+if (pendingChanges.length !== changes.length) {
+  console.log(`GEONWORKS duplicate suppression: ${changes.length - pendingChanges.length} already-sent change(s) skipped.`);
 }
 
 if (!DISCORD_WEBHOOK_URL) {
@@ -325,6 +333,12 @@ if (!DISCORD_WEBHOOK_URL) {
 }
 
 if (bulkInfo.bulk) {
+  const bulkId = changeId({ kind: 'bulk', row: { product: 'GEONWORKS GB bulk' }, fields: [{ field: 'signature', before: '', after: changeSignature(changes) }] });
+  if (sentChanges[bulkId]) {
+    saveState(rows, sentChanges);
+    console.log('Duplicate GEONWORKS bulk summary suppressed; state advanced.');
+    process.exit(0);
+  }
   await postDiscord({
     ...baseEmbed('⚠️ GEONWORKS 대량 변경 확인'),
     description: `동일한 변경을 두 번 연속 확인했습니다. 개별 알림 대신 요약합니다.\n변경 항목: **${changes.length}개** / 기존 목록: **${previousRows.length}개**`,
@@ -341,14 +355,17 @@ if (bulkInfo.bulk) {
       }
     ]
   });
-  saveState(rows);
+  sentChanges[bulkId] = new Date().toISOString();
+  saveState(rows, sentChanges);
   console.log(`Bulk GEONWORKS change summarized in one notification and state updated: ${changes.length} change(s).`);
   process.exit(0);
 }
 
-for (const change of changes) {
+for (const change of pendingChanges) {
   await notify(change);
+  sentChanges[changeId(change)] = new Date().toISOString();
+  saveState(previousRows, sentChanges);
 }
 
-saveState(rows);
-console.log(`Sent ${changes.length} GEONWORKS notification(s) and updated state.`);
+saveState(rows, sentChanges);
+console.log(`Sent ${pendingChanges.length} GEONWORKS notification(s), suppressed ${changes.length - pendingChanges.length} duplicate(s), and updated state.`);
