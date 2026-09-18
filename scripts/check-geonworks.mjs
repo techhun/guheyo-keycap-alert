@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { chromium } from 'playwright';
 
 const PAGE_URL = 'https://geonworks.kr/customhtml/GB_schedule.html';
+const DATA_URL = 'https://docs.google.com/spreadsheets/d/1i9SK14aWxpElXrjMinidKjVCXDi1XXBQSZJVB7ocbJk/gviz/tq?tqx=out:json&sheet=GB%20Schedule';
 const STATE_PATH = 'geonworks-state.json';
 const DISCORD_WEBHOOK_URL = (process.env.GEONWORKS_DISCORD_WEBHOOK_URL || '').trim();
 
@@ -51,31 +52,61 @@ function displayValue(label, value) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
-async function fetchRows() {
+function gvizCellValue(cell) {
+  if (!cell) return '';
+  if (cell.f !== undefined && cell.f !== null) return clean(cell.f);
+  if (cell.v !== undefined && cell.v !== null) return clean(cell.v);
+  return '';
+}
+
+function parseGvizResponse(text) {
+  const match = String(text ?? '').match(/google\.visualization\.Query\.setResponse\((.*)\);?\s*$/s);
+  if (!match) throw new Error('GEONWORKS gviz response wrapper was not recognized');
+
+  const payload = JSON.parse(match[1]);
+  if (payload?.status && payload.status !== 'ok') {
+    throw new Error(`GEONWORKS gviz returned status ${payload.status}`);
+  }
+
+  const rows = (payload?.table?.rows || [])
+    .map((row) => (row?.c || []).map(gvizCellValue))
+    .filter((cells) => cells.length >= 8 && cells[0])
+    .map((cells) => ({
+      product: cells[0],
+      gbStart: cells[1],
+      eta: cells[2],
+      type: cells[3],
+      manufacturer: cells[4],
+      status: cells[5],
+      update: cells[6],
+      note: cells[7] || '—'
+    }));
+
+  if (rows.length < 5) {
+    throw new Error(`GEONWORKS gviz returned suspiciously few rows: ${rows.length}`);
+  }
+  return rows;
+}
+
+async function fetchRowsDirect() {
+  const response = await fetch(DATA_URL, {
+    headers: { 'accept': 'application/json,text/plain,*/*' },
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) throw new Error(`GEONWORKS gviz HTTP ${response.status}`);
+
+  const rows = parseGvizResponse(await response.text());
+  console.log(`GEONWORKS GB direct rows: ${rows.length}`);
+  return rows;
+}
+
+async function fetchRowsBrowser() {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 
   try {
     const page = await browser.newPage({
       viewport: { width: 1440, height: 1600 },
       locale: 'ko-KR'
-    });
-
-    const dataRequests = new Set();
-    page.on('response', (response) => {
-      try {
-        const url = new URL(response.url());
-        if (/google|docs|sheets|gviz|csv/i.test(url.hostname + url.pathname + url.search)) {
-          dataRequests.add(`${response.status()} ${url.toString()}`);
-        }
-      } catch {}
-    });
-    page.on('requestfailed', (request) => {
-      try {
-        const url = new URL(request.url());
-        if (/google|docs|sheets|gviz|csv/i.test(url.hostname + url.pathname + url.search)) {
-          dataRequests.add(`FAILED ${url.toString()} · ${request.failure()?.errorText || 'unknown'}`);
-        }
-      } catch {}
     });
 
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -100,17 +131,23 @@ async function fetchRows() {
         }));
     });
 
-    if (dataRequests.size > 0) {
-      console.log('GEONWORKS data requests:', JSON.stringify([...dataRequests].slice(0, 20), null, 2));
-    }
-
     if (rows.length < 5) {
       throw new Error(`GEONWORKS page returned suspiciously few rows: ${rows.length}`);
     }
 
+    console.log(`GEONWORKS GB browser fallback rows: ${rows.length}`);
     return rows;
   } finally {
     await browser.close();
+  }
+}
+
+async function fetchRows() {
+  try {
+    return await fetchRowsDirect();
+  } catch (error) {
+    console.warn(`GEONWORKS direct fetch failed; using browser fallback: ${error?.message || error}`);
+    return fetchRowsBrowser();
   }
 }
 
