@@ -88,7 +88,9 @@ public class MainActivity extends Activity {
 
     private LinearLayout productList;
     private ScrollView productScroll;
-    private View scrollIndicator;
+    private LinearLayout scrollDots;
+    private int renderedProductCount;
+    private int dotWindowStart = -1;
     private TextView sessionButton;
     private WebView webView;
     private Dialog optionDialog;
@@ -184,7 +186,7 @@ public class MainActivity extends Activity {
         productScroll = new ScrollView(this);
         productScroll.setFillViewport(true);
         productScroll.setClipToPadding(false);
-        productScroll.setPadding(0, 0, 0, dp(12));
+        productScroll.setPadding(0, 0, dp(18), dp(12));
         productScroll.setVerticalScrollBarEnabled(false);
         productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         productArea.addView(productScroll, new FrameLayout.LayoutParams(
@@ -196,22 +198,22 @@ public class MainActivity extends Activity {
         productList.setOrientation(LinearLayout.VERTICAL);
         productScroll.addView(productList, matchWrap());
 
-        scrollIndicator = new View(this);
-        scrollIndicator.setAlpha(0f);
-        scrollIndicator.setBackground(roundRect(Color.rgb(188, 195, 204), 2));
-        FrameLayout.LayoutParams indicatorLp = new FrameLayout.LayoutParams(
-            dp(2),
-            dp(32),
-            Gravity.END | Gravity.TOP
+        scrollDots = new LinearLayout(this);
+        scrollDots.setOrientation(LinearLayout.VERTICAL);
+        scrollDots.setGravity(Gravity.CENTER);
+        scrollDots.setVisibility(View.GONE);
+        FrameLayout.LayoutParams dotsLp = new FrameLayout.LayoutParams(
+            dp(24),
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.END | Gravity.CENTER_VERTICAL
         );
-        indicatorLp.rightMargin = dp(2);
-        productArea.addView(scrollIndicator, indicatorLp);
+        productArea.addView(scrollDots, dotsLp);
 
         productScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
-            updateScrollIndicator(true)
+            updateCardDots()
         );
         productArea.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
-            updateScrollIndicator(false)
+            updateCardDots()
         );
 
         webView = new WebView(this);
@@ -844,6 +846,7 @@ public class MainActivity extends Activity {
             value.setGravity(Gravity.CENTER);
             empty.addView(value);
             productList.addView(empty, sectionParams());
+            rebuildCardDots(0);
             if (animate) Motion.enter(empty, 20L);
             return;
         }
@@ -916,51 +919,148 @@ public class MainActivity extends Activity {
             actions.addView(edit, rowParams(0.72f, 8));
         }
 
+        rebuildCardDots(productList.getChildCount());
+
         if (productScroll != null) {
             productScroll.post(() -> {
                 productScroll.scrollTo(0, oldScroll);
-                updateScrollIndicator(false);
+                updateCardDots();
             });
         }
     }
 
-    private void updateScrollIndicator(boolean reveal) {
-        if (productScroll == null || scrollIndicator == null || productList == null) return;
+    private void rebuildCardDots(int productCount) {
+        renderedProductCount = Math.max(0, productCount);
+        dotWindowStart = -1;
+        if (scrollDots == null) return;
+        scrollDots.removeAllViews();
+        updateCardDots();
+    }
+
+    private void updateCardDots() {
+        if (productScroll == null || productList == null || scrollDots == null) return;
 
         int viewport = productScroll.getHeight() - productScroll.getPaddingTop() - productScroll.getPaddingBottom();
         int content = productList.getHeight();
-        if (viewport <= 0 || content <= viewport) {
-            scrollIndicator.animate().cancel();
-            scrollIndicator.setAlpha(0f);
+        int count = Math.min(renderedProductCount, productList.getChildCount());
+        if (count <= 1 || viewport <= 0 || content <= viewport) {
+            scrollDots.setVisibility(View.GONE);
             return;
         }
 
-        int minThumb = dp(28);
-        int thumbHeight = Math.max(minThumb, Math.round(viewport * (viewport / (float) content)));
-        thumbHeight = Math.min(viewport, thumbHeight);
+        int active = closestCardIndex(count);
+        int visibleCount = Math.min(7, count);
+        int start = count <= 7
+            ? 0
+            : Math.max(0, Math.min(count - visibleCount, active - visibleCount / 2));
 
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) scrollIndicator.getLayoutParams();
-        if (lp.height != thumbHeight) {
-            lp.height = thumbHeight;
-            scrollIndicator.setLayoutParams(lp);
+        if (start != dotWindowStart || scrollDots.getChildCount() != visibleCount) {
+            buildDotWindow(start, visibleCount);
         }
 
-        int maxScroll = Math.max(1, content - viewport);
-        int travel = Math.max(0, viewport - thumbHeight);
-        float progress = Math.max(0f, Math.min(1f, productScroll.getScrollY() / (float) maxScroll));
-        scrollIndicator.setTranslationY(progress * travel);
+        scrollDots.setVisibility(View.VISIBLE);
+        float viewportCenter = productScroll.getScrollY() + viewport / 2f;
 
-        if (!reveal) return;
-        scrollIndicator.animate().cancel();
-        scrollIndicator.animate()
-            .alpha(0.52f)
-            .setDuration(90L)
-            .withEndAction(() -> scrollIndicator.animate()
-                .alpha(0f)
-                .setStartDelay(650L)
-                .setDuration(260L)
-                .start())
-            .start();
+        for (int i = 0; i < scrollDots.getChildCount(); i++) {
+            View holder = scrollDots.getChildAt(i);
+            Object tag = holder.getTag();
+            if (!(tag instanceof Integer)) continue;
+            int target = (Integer) tag;
+            if (target < 0 || target >= count) continue;
+
+            View dot = holder instanceof FrameLayout && ((FrameLayout) holder).getChildCount() > 0
+                ? ((FrameLayout) holder).getChildAt(0)
+                : null;
+            View card = productList.getChildAt(target);
+            if (dot == null || card == null) continue;
+
+            float cardCenter = card.getTop() + card.getHeight() / 2f;
+            float distance = Math.abs(cardCenter - viewportCenter);
+            float emphasisRange = Math.max(dp(90), card.getHeight() * 0.9f);
+            float emphasis = Math.max(0f, 1f - distance / emphasisRange);
+
+            boolean hasBefore = start > 0 && i == 0;
+            boolean hasAfter = start + visibleCount < count && i == visibleCount - 1;
+            float edgeFactor = (hasBefore || hasAfter) ? 0.78f : 1f;
+
+            float scale = (0.72f + 0.28f * emphasis) * edgeFactor;
+            dot.setScaleX(scale);
+            dot.setScaleY(scale);
+            dot.setAlpha((0.42f + 0.58f * emphasis) * edgeFactor);
+            dot.setBackground(roundRect(
+                blendColor(Color.rgb(188, 195, 204), BLUE, emphasis),
+                8
+            ));
+        }
+    }
+
+    private void buildDotWindow(int start, int visibleCount) {
+        if (scrollDots == null) return;
+        dotWindowStart = start;
+        scrollDots.removeAllViews();
+
+        for (int i = 0; i < visibleCount; i++) {
+            int target = start + i;
+
+            FrameLayout holder = new FrameLayout(this);
+            holder.setTag(target);
+            holder.setContentDescription((target + 1) + "번째 상품");
+            LinearLayout.LayoutParams holderLp = new LinearLayout.LayoutParams(dp(24), dp(24));
+            scrollDots.addView(holder, holderLp);
+
+            View dot = new View(this);
+            dot.setBackground(roundRect(Color.rgb(188, 195, 204), 8));
+            FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(
+                dp(7),
+                dp(7),
+                Gravity.CENTER
+            );
+            holder.addView(dot, dotLp);
+
+            holder.setOnClickListener(v -> {
+                Object value = v.getTag();
+                if (value instanceof Integer) scrollCardToCenter((Integer) value);
+            });
+        }
+    }
+
+    private int closestCardIndex(int count) {
+        int viewport = productScroll.getHeight() - productScroll.getPaddingTop() - productScroll.getPaddingBottom();
+        float center = productScroll.getScrollY() + viewport / 2f;
+        int closest = 0;
+        float closestDistance = Float.MAX_VALUE;
+
+        for (int i = 0; i < count; i++) {
+            View card = productList.getChildAt(i);
+            if (card == null) continue;
+            float cardCenter = card.getTop() + card.getHeight() / 2f;
+            float distance = Math.abs(cardCenter - center);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closest = i;
+            }
+        }
+        return closest;
+    }
+
+    private void scrollCardToCenter(int index) {
+        if (productScroll == null || productList == null
+            || index < 0 || index >= productList.getChildCount()) return;
+
+        View card = productList.getChildAt(index);
+        if (card == null) return;
+        int viewport = productScroll.getHeight() - productScroll.getPaddingTop() - productScroll.getPaddingBottom();
+        int target = card.getTop() - Math.max(0, (viewport - card.getHeight()) / 2);
+        int maxScroll = Math.max(0, productList.getHeight() - viewport);
+        productScroll.smoothScrollTo(0, Math.max(0, Math.min(maxScroll, target)));
+    }
+
+    private int blendColor(int from, int to, float amount) {
+        float value = Math.max(0f, Math.min(1f, amount));
+        int r = Math.round(Color.red(from) + (Color.red(to) - Color.red(from)) * value);
+        int g = Math.round(Color.green(from) + (Color.green(to) - Color.green(from)) * value);
+        int b = Math.round(Color.blue(from) + (Color.blue(to) - Color.blue(from)) * value);
+        return Color.rgb(r, g, b);
     }
 
     private JSONArray orderedProducts(JSONArray source) {
