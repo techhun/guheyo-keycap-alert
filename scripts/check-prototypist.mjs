@@ -57,7 +57,7 @@ async function extractPage(page, source) {
 
   await page.waitForFunction((statuses) => {
     const title = document.title || '';
-    if (isNotionChallengeTitle(title)) return true;
+    if (/just a moment|잠시만 기다리십시오/i.test(title)) return true;
 
     const body = document.body?.innerText || '';
     const statusCount = statuses.filter((status) => body.includes(status)).length;
