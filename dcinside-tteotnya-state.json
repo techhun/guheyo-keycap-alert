@@ -1,10 +1,11 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-17T23:05:41.452Z",
-  "source": "desktop",
-  "lastSeenNo": 2700645,
+  "updatedAt": "2026-09-18T06:38:37.949Z",
+  "source": "direct-http",
+  "lastSeenNo": 2700889,
   "recentNos": [
+    2700889,
     2700645,
     2700557,
     2700516,
@@ -53,7 +54,6 @@
     2697417,
     2697367,
     2697205,
-    2697191,
-    2697063
+    2697191
   ]
 }
