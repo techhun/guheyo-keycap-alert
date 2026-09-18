@@ -33,6 +33,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -87,6 +88,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout productList;
     private ScrollView productScroll;
+    private View scrollIndicator;
     private TextView sessionButton;
     private WebView webView;
     private Dialog optionDialog;
@@ -172,19 +174,45 @@ public class MainActivity extends Activity {
         Motion.press(add);
         addRow.addView(add);
 
-        productScroll = new ScrollView(this);
-        productScroll.setFillViewport(true);
-        productScroll.setClipToPadding(false);
-        productScroll.setPadding(0, 0, 0, dp(12));
-        root.addView(productScroll, new LinearLayout.LayoutParams(
+        FrameLayout productArea = new FrameLayout(this);
+        root.addView(productArea, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             0,
             1f
         ));
 
+        productScroll = new ScrollView(this);
+        productScroll.setFillViewport(true);
+        productScroll.setClipToPadding(false);
+        productScroll.setPadding(0, 0, 0, dp(12));
+        productScroll.setVerticalScrollBarEnabled(false);
+        productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        productArea.addView(productScroll, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+
         productList = new LinearLayout(this);
         productList.setOrientation(LinearLayout.VERTICAL);
         productScroll.addView(productList, matchWrap());
+
+        scrollIndicator = new View(this);
+        scrollIndicator.setAlpha(0f);
+        scrollIndicator.setBackground(roundRect(Color.rgb(188, 195, 204), 2));
+        FrameLayout.LayoutParams indicatorLp = new FrameLayout.LayoutParams(
+            dp(2),
+            dp(32),
+            Gravity.END | Gravity.TOP
+        );
+        indicatorLp.rightMargin = dp(2);
+        productArea.addView(scrollIndicator, indicatorLp);
+
+        productScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
+            updateScrollIndicator(true)
+        );
+        productArea.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) ->
+            updateScrollIndicator(false)
+        );
 
         webView = new WebView(this);
         configureWebView(webView);
@@ -888,7 +916,51 @@ public class MainActivity extends Activity {
             actions.addView(edit, rowParams(0.72f, 8));
         }
 
-        if (productScroll != null) productScroll.post(() -> productScroll.scrollTo(0, oldScroll));
+        if (productScroll != null) {
+            productScroll.post(() -> {
+                productScroll.scrollTo(0, oldScroll);
+                updateScrollIndicator(false);
+            });
+        }
+    }
+
+    private void updateScrollIndicator(boolean reveal) {
+        if (productScroll == null || scrollIndicator == null || productList == null) return;
+
+        int viewport = productScroll.getHeight() - productScroll.getPaddingTop() - productScroll.getPaddingBottom();
+        int content = productList.getHeight();
+        if (viewport <= 0 || content <= viewport) {
+            scrollIndicator.animate().cancel();
+            scrollIndicator.setAlpha(0f);
+            return;
+        }
+
+        int minThumb = dp(28);
+        int thumbHeight = Math.max(minThumb, Math.round(viewport * (viewport / (float) content)));
+        thumbHeight = Math.min(viewport, thumbHeight);
+
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) scrollIndicator.getLayoutParams();
+        if (lp.height != thumbHeight) {
+            lp.height = thumbHeight;
+            scrollIndicator.setLayoutParams(lp);
+        }
+
+        int maxScroll = Math.max(1, content - viewport);
+        int travel = Math.max(0, viewport - thumbHeight);
+        float progress = Math.max(0f, Math.min(1f, productScroll.getScrollY() / (float) maxScroll));
+        scrollIndicator.setTranslationY(progress * travel);
+
+        if (!reveal) return;
+        scrollIndicator.animate().cancel();
+        scrollIndicator.animate()
+            .alpha(0.52f)
+            .setDuration(90L)
+            .withEndAction(() -> scrollIndicator.animate()
+                .alpha(0f)
+                .setStartDelay(650L)
+                .setDuration(260L)
+                .start())
+            .start();
     }
 
     private JSONArray orderedProducts(JSONArray source) {
