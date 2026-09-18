@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T18:02:02.610Z",
+  "updatedAt": "2026-09-18T11:01:25.065Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -900,7 +900,7 @@
       "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
       "itemUrl": "https://prototypist.notion.site/GMK-CYL-King-of-the-Seas-3640423341548040a0a7ed99012077a8",
       "product": "GMK CYL King of the Seas",
-      "status": "Shipping to Prototypist",
+      "status": "Shipping to Customers",
       "expectedShipping": "Q4 2026"
     },
     {
@@ -910,7 +910,7 @@
       "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
       "itemUrl": "https://prototypist.notion.site/GMK-CYL-Ramune-36404233415480c186dac89814cc92ec",
       "product": "GMK CYL Ramune",
-      "status": "Shipping to Prototypist",
+      "status": "Shipping to Customers",
       "expectedShipping": "Q4 2026"
     },
     {
@@ -1783,5 +1783,6 @@
       "status": "Completed",
       "expectedShipping": "Q1 2026"
     }
-  ]
+  ],
+  "fallbackSince": {}
 }
