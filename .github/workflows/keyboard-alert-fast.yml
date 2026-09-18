@@ -30,6 +30,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Restore watcher state
+        shell: bash
+        run: |
+          git fetch origin watcher-state
+          for file in guheyo-state.json dcinside-tteotnya-state.json system-health-fast.json; do
+            if git cat-file -e "origin/watcher-state:$file" 2>/dev/null; then
+              git show "origin/watcher-state:$file" > "$file"
+            fi
+          done
+
       - name: Check Guheyo keycap listings
         env:
           GUHEYO_NTFY_TOPIC: ${{ secrets.GUHEYO_NTFY_TOPIC }}
@@ -73,9 +83,10 @@ jobs:
         if: always()
         shell: bash
         run: |
+          git fetch origin watcher-state
           changed_files=()
           for file in guheyo-state.json dcinside-tteotnya-state.json system-health-fast.json; do
-            if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
+            if [ -f "$file" ] && ! git diff --quiet origin/watcher-state -- "$file"; then
               changed_files+=("$file")
             fi
           done
@@ -83,18 +94,29 @@ jobs:
             echo 'Fast watcher state unchanged.'
             exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add "${changed_files[@]}"
-          git commit -m 'Update fast watcher state'
+
+          state_dir="/tmp/keyboard-alert-watcher-state-fast"
+          rm -rf "$state_dir"
+          git worktree add -B watcher-state "$state_dir" origin/watcher-state
+
+          for file in "${changed_files[@]}"; do
+            cp "$file" "$state_dir/$file"
+          done
+
+          git -C "$state_dir" config user.name 'github-actions[bot]'
+          git -C "$state_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$state_dir" add "${changed_files[@]}"
+          git -C "$state_dir" commit -m 'Update fast watcher state'
+
           for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push origin main; then
+            if git -C "$state_dir" pull --rebase origin watcher-state && git -C "$state_dir" push origin HEAD:watcher-state; then
               exit 0
             fi
-            git rebase --abort >/dev/null 2>&1 || true
+            git -C "$state_dir" rebase --abort >/dev/null 2>&1 || true
             echo "Fast state push attempt ${attempt} failed; retrying..."
             sleep $((attempt * 2))
           done
+
           echo 'Failed to persist fast watcher state after retries.'
           exit 1
 
