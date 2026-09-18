@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-18T14:21:43.655Z",
+  "updatedAt": "2026-09-18T14:31:29.683Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -1328,16 +1328,6 @@
       "sourceLabel": "Keyset",
       "sourceEmoji": "🧢",
       "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/DCS-Olivetti-36404233415480f9b87bde3ad5e9e1ac",
-      "product": "DCS Olivetti",
-      "status": "In Manufacturing",
-      "expectedShipping": "Q3 2026"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
       "itemUrl": "https://prototypist.notion.site/SWG-Classic-Red-36404233415480bc9a96cdd3ca69953a",
       "product": "SWG Classic Red",
       "status": "In Manufacturing",
@@ -1488,8 +1478,28 @@
       "sourceLabel": "Keyset",
       "sourceEmoji": "🧢",
       "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
+      "itemUrl": "https://prototypist.notion.site/SWG-Midnight-Rainbow-39d042334154807e8e43e17141dcaae3",
+      "product": "SWG Midnight Rainbow",
+      "status": "In Manufacturing",
+      "expectedShipping": "Q1 2027"
+    },
+    {
+      "sourceId": "keyset",
+      "sourceLabel": "Keyset",
+      "sourceEmoji": "🧢",
+      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
       "itemUrl": "https://prototypist.notion.site/Abandoned-Pets-Artisans-Beige-31704233415480428c6adffc7408fae3",
       "product": "Abandoned Pets Artisans - Beige",
+      "status": "Shipping to Prototypist",
+      "expectedShipping": "Q3 2026"
+    },
+    {
+      "sourceId": "keyset",
+      "sourceLabel": "Keyset",
+      "sourceEmoji": "🧢",
+      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
+      "itemUrl": "https://prototypist.notion.site/DCS-Olivetti-36404233415480f9b87bde3ad5e9e1ac",
+      "product": "DCS Olivetti",
       "status": "Shipping to Prototypist",
       "expectedShipping": "Q3 2026"
     },
@@ -1530,7 +1540,7 @@
       "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
       "itemUrl": "https://prototypist.notion.site/SWG-Euler-36404233415480219c2ef639a21933fe",
       "product": "SWG Euler",
-      "status": "Shipping to Customers",
+      "status": "Completed",
       "expectedShipping": "Q3 2026"
     },
     {
@@ -1772,20 +1782,7 @@
       "product": "PBS Modern Abacus (MoAb)",
       "status": "Completed",
       "expectedShipping": "Q1 2026"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/MM-Glazed-Beige-2c4042334154805ebe4ac8c842087bc8",
-      "product": "MM Glazed Beige",
-      "status": "Completed",
-      "expectedShipping": "Q1 2026"
     }
   ],
-  "fallbackSince": {
-    "gmk": "2026-09-18T14:21:29.666Z",
-    "keyset": "2026-09-18T14:21:42.089Z"
-  }
+  "fallbackSince": {}
 }
