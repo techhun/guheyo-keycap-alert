@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
 
         LinearLayout addRow = new LinearLayout(this);
         addRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        addRow.setPadding(0, dp(10), 0, dp(8));
+        addRow.setPadding(0, dp(10), dp(4), dp(8));
         root.addView(addRow, matchWrap());
         TextView add = text("+ 상품 추가", 15, BLUE, Typeface.BOLD);
         add.setPadding(dp(12), dp(8), 0, dp(8));
@@ -212,6 +212,7 @@ public class MainActivity extends Activity {
 
         productList = new LinearLayout(this);
         productList.setOrientation(LinearLayout.VERTICAL);
+        productList.setPadding(dp(4), 0, dp(4), 0);
         productScroll.addView(productList, matchWrap());
 
         scrollDots = new LinearLayout(this);
@@ -219,11 +220,11 @@ public class MainActivity extends Activity {
         scrollDots.setGravity(Gravity.CENTER);
         scrollDots.setVisibility(View.GONE);
         FrameLayout.LayoutParams dotsLp = new FrameLayout.LayoutParams(
-            dp(24),
+            dp(20),
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.END | Gravity.CENTER_VERTICAL
         );
-        scrollDots.setTranslationX(dp(20));
+        scrollDots.setTranslationX(dp(16));
         productArea.addView(scrollDots, dotsLp);
 
         productScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
@@ -1091,14 +1092,14 @@ public class MainActivity extends Activity {
             FrameLayout holder = new FrameLayout(this);
             holder.setTag(target);
             holder.setContentDescription((target + 1) + "번째 상품");
-            LinearLayout.LayoutParams holderLp = new LinearLayout.LayoutParams(dp(24), dp(24));
+            LinearLayout.LayoutParams holderLp = new LinearLayout.LayoutParams(dp(20), dp(20));
             scrollDots.addView(holder, holderLp);
 
             View dot = new View(this);
             dot.setBackground(roundRect(Color.rgb(188, 195, 204), 8));
             FrameLayout.LayoutParams dotLp = new FrameLayout.LayoutParams(
-                dp(7),
-                dp(7),
+                dp(6),
+                dp(6),
                 Gravity.CENTER
             );
             holder.addView(dot, dotLp);
