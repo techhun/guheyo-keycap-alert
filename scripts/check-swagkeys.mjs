@@ -28,6 +28,7 @@ const truncate = (value, maxLength = 1000) => {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const FALLBACK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 
 const ENGLISH_MONTHS = new Map([
@@ -235,6 +236,8 @@ async function extractRows(page) {
 }
 
 async function fetchSnapshot(fallback = {}) {
+  const fallbackSince = { ...(fallback.fallbackSince || {}) };
+  let fallbackMetadataChanged = false;
   const fallbackRows = Array.isArray(fallback.rows) ? fallback.rows : [];
   const fallbackRoadmapIsValid = Boolean(
     fallback.announcement?.heading
@@ -256,12 +259,26 @@ async function fetchSnapshot(fallback = {}) {
       if (!quarterSnapshotIsValid(candidate.quarters)) throw new Error('quarter roadmap snapshot failed validation');
       if (Object.values(candidate.quarters).flat().length < 5) throw new Error('quarter roadmap returned too few products');
       roadmap = candidate;
+      if (fallbackSince.roadmap) {
+        delete fallbackSince.roadmap;
+        fallbackMetadataChanged = true;
+        console.log('SWAGKEYS roadmap fresh data recovered; fallback timer cleared.');
+      }
     } catch (error) {
       roadmapError = error;
       roadmapFresh = false;
       if (fallbackRoadmapIsValid) {
+        const startedAt = fallbackSince.roadmap || new Date().toISOString();
+        const ageMs = Date.now() - Date.parse(startedAt);
+        if (!Number.isFinite(ageMs) || ageMs >= FALLBACK_MAX_AGE_MS) {
+          throw new Error(`SWAGKEYS roadmap has been unavailable for more than 6 hours: ${error?.message || error}`);
+        }
+        if (!fallbackSince.roadmap) {
+          fallbackSince.roadmap = startedAt;
+          fallbackMetadataChanged = true;
+        }
         roadmap = { announcement: fallback.announcement, quarters: fallback.quarters };
-        console.warn('SWAGKEYS roadmap unavailable after retries. Reusing the stored verified roadmap for this run.');
+        console.warn(`SWAGKEYS roadmap unavailable after retries. Reusing stored roadmap; fallback age=${Math.floor(ageMs / 60000)}m.`);
       }
     }
 
@@ -272,12 +289,26 @@ async function fetchSnapshot(fallback = {}) {
       const candidateRows = await openWithRetry(context, STATUS_URL, 'status table', extractRows);
       if (candidateRows.length < 10) throw new Error(`status table returned too few rows: ${candidateRows.length}`);
       rows = candidateRows;
+      if (fallbackSince.status) {
+        delete fallbackSince.status;
+        fallbackMetadataChanged = true;
+        console.log('SWAGKEYS status table fresh data recovered; fallback timer cleared.');
+      }
     } catch (error) {
       statusError = error;
       statusFresh = false;
       if (fallbackRows.length >= 10) {
+        const startedAt = fallbackSince.status || new Date().toISOString();
+        const ageMs = Date.now() - Date.parse(startedAt);
+        if (!Number.isFinite(ageMs) || ageMs >= FALLBACK_MAX_AGE_MS) {
+          throw new Error(`SWAGKEYS status table has been unavailable for more than 6 hours: ${error?.message || error}`);
+        }
+        if (!fallbackSince.status) {
+          fallbackSince.status = startedAt;
+          fallbackMetadataChanged = true;
+        }
         rows = fallbackRows;
-        console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows for this run.`);
+        console.warn(`SWAGKEYS status table unavailable after retries. Reusing ${rows.length} stored rows; fallback age=${Math.floor(ageMs / 60000)}m.`);
       }
     }
 
@@ -292,7 +323,9 @@ async function fetchSnapshot(fallback = {}) {
       quarters: roadmap.quarters,
       rows,
       roadmapFresh,
-      statusFresh
+      statusFresh,
+      fallbackSince,
+      fallbackMetadataChanged
     };
   } finally {
     await context.close();
@@ -316,7 +349,8 @@ function saveState(snapshot) {
     updatedAt: new Date().toISOString(),
     announcement: snapshot.announcement,
     quarters: snapshot.quarters,
-    rows: snapshot.rows.map((row) => ({ ...row, eta: normalizeEta(row.eta) }))
+    rows: snapshot.rows.map((row) => ({ ...row, eta: normalizeEta(row.eta) })),
+    fallbackSince: snapshot.fallbackSince || {}
   }, null, 2) + '\n');
 }
 
@@ -484,7 +518,12 @@ async function postDiscord(embed) {
 async function main() {
   const state = loadState();
   const previousRows = Array.isArray(state?.rows) ? state.rows : [];
-  const fallback = { announcement: state?.announcement, quarters: state?.quarters, rows: previousRows };
+  const fallback = {
+    announcement: state?.announcement,
+    quarters: state?.quarters,
+    rows: previousRows,
+    fallbackSince: state?.fallbackSince && typeof state.fallbackSince === 'object' ? state.fallbackSince : {}
+  };
   let snapshot = await fetchSnapshot(fallback);
   console.log(`SWAGKEYS announcement: ${snapshot.announcement.heading}${snapshot.roadmapFresh ? '' : ' (stored fallback)'}`);
   console.log(`SWAGKEYS status rows: ${snapshot.rows.length}${snapshot.statusFresh ? '' : ' (stored fallback)'}`);
@@ -545,7 +584,12 @@ async function main() {
   console.log(`SWAGKEYS product changes: ${changes.length}`);
 
   if (!announcementChanged && !quartersChanged && changes.length === 0) {
-    console.log('No SWAGKEYS state update needed.');
+    if (snapshot.fallbackMetadataChanged) {
+      saveState(snapshot);
+      console.log('SWAGKEYS fallback metadata updated.');
+    } else {
+      console.log('No SWAGKEYS state update needed.');
+    }
     return;
   }
   if (!DISCORD_WEBHOOK_URL) {
