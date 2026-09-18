@@ -131,6 +131,8 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int top;
             int bottom;
@@ -151,7 +153,7 @@ public class MainActivity extends Activity {
         root.addView(topRow, matchWrap());
 
         ImageView appIcon = new ImageView(this);
-        appIcon.setImageResource(R.mipmap.ic_launcher);
+        appIcon.setImageResource(R.drawable.restock_icon);
         appIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         topRow.addView(appIcon, new LinearLayout.LayoutParams(dp(46), dp(46)));
 
@@ -189,6 +191,8 @@ public class MainActivity extends Activity {
         addRow.addView(add);
 
         FrameLayout productArea = new FrameLayout(this);
+        productArea.setClipChildren(false);
+        productArea.setClipToPadding(false);
         root.addView(productArea, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             0,
@@ -198,7 +202,7 @@ public class MainActivity extends Activity {
         productScroll = new ScrollView(this);
         productScroll.setFillViewport(true);
         productScroll.setClipToPadding(false);
-        productScroll.setPadding(0, 0, dp(32), dp(12));
+        productScroll.setPadding(0, 0, 0, dp(12));
         productScroll.setVerticalScrollBarEnabled(false);
         productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         productArea.addView(productScroll, new FrameLayout.LayoutParams(
@@ -219,6 +223,7 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.END | Gravity.CENTER_VERTICAL
         );
+        scrollDots.setTranslationX(dp(20));
         productArea.addView(scrollDots, dotsLp);
 
         productScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
