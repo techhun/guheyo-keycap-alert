@@ -1,0 +1,40 @@
+name: GEONWORKS regression tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/check-geonworks.mjs'
+      - 'scripts/check-geonworks-release.mjs'
+      - 'scripts/geonworks-safety.mjs'
+      - 'tests/geonworks-safety.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/geonworks-tests.yml'
+  pull_request:
+    paths:
+      - 'scripts/check-geonworks.mjs'
+      - 'scripts/check-geonworks-release.mjs'
+      - 'scripts/geonworks-safety.mjs'
+      - 'tests/geonworks-safety.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Run regression tests
+        run: npm test
