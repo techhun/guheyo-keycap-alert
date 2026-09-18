@@ -10,8 +10,8 @@ android {
         applicationId = "com.techhun.keyboardalert.restock"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.11.3"
+        versionCode = 22
+        versionName = "0.12.0"
     }
 
     compileOptions {
