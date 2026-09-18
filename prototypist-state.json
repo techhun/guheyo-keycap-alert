@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-18T11:41:36.993Z",
+  "updatedAt": "2026-09-18T11:51:31.438Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -22,6 +22,16 @@
       "product": "Supernova 60%",
       "status": "In Group Buy",
       "expectedShipping": "Q1 2027"
+    },
+    {
+      "sourceId": "keyboard",
+      "sourceLabel": "Keyboard",
+      "sourceEmoji": "⌨️",
+      "sourceUrl": "https://prototypist.notion.site/57d8169dada041f6b52b1d091e3e2c97?v=449c85bd9a29455fa8d1330e23680c5a",
+      "itemUrl": "https://prototypist.notion.site/Dia-3df04233415480aa90c6c1c5e13758cf",
+      "product": "Dia",
+      "status": "In Group Buy",
+      "expectedShipping": "Q3 2027"
     },
     {
       "sourceId": "keyboard",
@@ -1795,8 +1805,7 @@
     }
   ],
   "fallbackSince": {
-    "keyboard": "2026-09-18T11:41:10.678Z",
-    "gmk": "2026-09-18T11:41:23.070Z",
-    "keyset": "2026-09-18T11:41:35.430Z"
+    "gmk": "2026-09-18T11:51:15.591Z",
+    "keyset": "2026-09-18T11:51:28.129Z"
   }
 }
