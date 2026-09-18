@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright';
+import { bulkChangeInfo, changeSignature, clean, comparableValue, normalizeKey, validateReleaseRows } from './geonworks-safety.mjs';
 
 const PAGE_URL = 'https://geonworks.kr/customhtml/release/release.html';
 const DATA_URL = 'https://script.google.com/macros/s/AKfycbzOHhh_erWY6B-Ru1hpRZbwImXFP4UBWZj6gRiuvcOv9bVPOAIWN3-zGWFaQyIQE6xG/exec';
@@ -20,13 +21,6 @@ const FIELD_LABELS = {
 const COMPARED_FIELDS = Object.keys(FIELD_LABELS);
 const DATE_LABELS = new Set(['판매 시작일', '판매 종료일']);
 
-function clean(value) {
-  return String(value ?? '')
-    .replace(/\r/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function truncate(value, maxLength = 1000) {
   const text = String(value ?? '')
     .replace(/\r/g, '')
@@ -36,16 +30,6 @@ function truncate(value, maxLength = 1000) {
     .join('\n') || '—';
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-function comparableValue(value) {
-  const text = clean(value);
-  if (!text || /^(?:—|–|-)$/u.test(text)) return '';
-  return text;
-}
-
-function normalizeKey(value) {
-  return comparableValue(value).toLocaleLowerCase('en-US');
 }
 
 function displayValue(label, value) {
@@ -153,6 +137,7 @@ async function fetchRowsDirect() {
     throw new Error(`GEONWORKS Release API returned no recognizable rows; shape=${shape}`);
   }
 
+  validateReleaseRows(rows);
   console.log(`GEONWORKS Release direct rows: ${rows.length}`);
   return rows;
 }
@@ -204,10 +189,7 @@ async function fetchRowsBrowser() {
         }));
     });
 
-    if (rows.length < 1) {
-      throw new Error(`GEONWORKS Release page returned no rows: ${rows.length}`);
-    }
-
+    validateReleaseRows(rows);
     console.log(`GEONWORKS Release browser fallback rows: ${rows.length}`);
     return rows;
   } finally {
@@ -393,6 +375,7 @@ if (!state?.initialized || previousRows.length === 0) {
 }
 
 const validateRows = (candidateRows) => {
+  validateReleaseRows(candidateRows);
   if (candidateRows.length < Math.max(1, Math.floor(previousRows.length * 0.5))) {
     throw new Error(`GEONWORKS Release row count dropped unexpectedly: ${previousRows.length} -> ${candidateRows.length}. State was not updated.`);
   }
@@ -405,21 +388,26 @@ const removalSignature = (candidateChanges) => candidateChanges
 
 validateRows(rows);
 let changes = diffRows(previousRows, rows);
+let bulkInfo = bulkChangeInfo(changes, previousRows.length);
 const firstRemovalSignature = removalSignature(changes);
-if (firstRemovalSignature) {
-  console.warn('GEONWORKS Release removal detected; re-reading once before notifying.');
+const needsVerification = Boolean(firstRemovalSignature) || bulkInfo.bulk;
+
+if (needsVerification) {
+  console.warn(`GEONWORKS Release ${bulkInfo.bulk ? `bulk change detected (${bulkInfo.count}, ${Math.round(bulkInfo.ratio * 100)}%)` : 'removal detected'}; re-reading once before notifying.`);
+  const firstSignature = changeSignature(changes);
   const verificationRows = await fetchRows();
   validateRows(verificationRows);
   const verificationChanges = diffRows(previousRows, verificationRows);
-  const secondRemovalSignature = removalSignature(verificationChanges);
-  if (secondRemovalSignature && secondRemovalSignature !== firstRemovalSignature) {
-    throw new Error('GEONWORKS Release removal set changed during verification. State was not updated.');
+  const secondSignature = changeSignature(verificationChanges);
+
+  if (firstSignature !== secondSignature) {
+    throw new Error('GEONWORKS Release change set changed during verification. State was not updated.');
   }
+
   rows = verificationRows;
   changes = verificationChanges;
-  console.log(secondRemovalSignature
-    ? 'GEONWORKS Release removal confirmed by two consecutive reads.'
-    : 'GEONWORKS Release removal disappeared on verification; using the verified second snapshot.');
+  bulkInfo = bulkChangeInfo(changes, previousRows.length);
+  console.log(`GEONWORKS Release change set confirmed by two consecutive reads: ${changes.length} change(s).`);
 }
 
 console.log(`GEONWORKS Release changes: ${changes.length}`);
@@ -439,6 +427,28 @@ if (changes.length === 0) {
 
 if (!DISCORD_WEBHOOK_URL) {
   console.log('[discord] GEONWORKS_DISCORD_WEBHOOK_URL is not configured. Changes remain pending; state was not updated.');
+  process.exit(0);
+}
+
+if (bulkInfo.bulk) {
+  await postDiscord({
+    ...baseEmbed('⚠️ GEONWORKS 출시 일정 대량 변경 확인'),
+    description: `동일한 변경을 두 번 연속 확인했습니다. 개별 알림 대신 요약합니다.\n변경 항목: **${changes.length}개** / 기존 목록: **${previousRows.length}개**`,
+    fields: [
+      {
+        name: '변경 예시',
+        value: truncate(changes.slice(0, 10).map((change) => {
+          const labels = change.kind === 'changed'
+            ? change.fields.map((field) => field.label).join(', ')
+            : change.kind;
+          return `• ${change.row.product}: ${labels}`;
+        }).join('\n')),
+        inline: false
+      }
+    ]
+  });
+  saveState(rows);
+  console.log(`Bulk GEONWORKS Release change summarized in one notification and state updated: ${changes.length} change(s).`);
   process.exit(0);
 }
 
