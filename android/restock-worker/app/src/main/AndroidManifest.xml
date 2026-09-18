@@ -15,8 +15,8 @@
     <application
         android:allowBackup="false"
         android:hardwareAccelerated="true"
-        android:icon="@drawable/restock_icon"
-        android:roundIcon="@drawable/restock_icon"
+        android:icon="@mipmap/restock_launcher"
+        android:roundIcon="@mipmap/restock_launcher"
         android:label="Restock"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
