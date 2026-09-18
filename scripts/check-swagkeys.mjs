@@ -564,7 +564,7 @@ async function main() {
   const firstRemovalSignature = removalSignature(calculated.quarterChanges, calculated.changes);
   if (firstRemovalSignature) {
     console.warn('SWAGKEYS removal detected; re-reading once before notifying.');
-    const verificationSnapshot = await fetchSnapshot(fallback);
+    const verificationSnapshot = await fetchSnapshot({ ...fallback, fallbackSince: snapshot.fallbackSince });
     validateRows(verificationSnapshot);
     const verificationCalculated = calculateChanges(verificationSnapshot);
     const secondRemovalSignature = removalSignature(verificationCalculated.quarterChanges, verificationCalculated.changes);
