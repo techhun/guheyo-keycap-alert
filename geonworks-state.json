@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-18T03:50:35.581Z",
+  "updatedAt": "2026-09-16T09:16:01.458Z",
   "rows": [
     {
       "product": "GMK DIVINAPAPAYA",
@@ -398,7 +398,7 @@
       "gbStart": "2026. 5. 26",
       "eta": "2026. 12. 31",
       "type": "Keyboard",
-      "manufacturer": "",
+      "manufacturer": "—",
       "status": "In progress",
       "update": "2026. 9. 9",
       "note": "Cnc 85% 완료. 플레이트 완성. pcb 생산 중 / CNC 85% complete. Plate completed. PCB in production."
@@ -438,7 +438,7 @@
       "gbStart": "2026. 6. 4",
       "eta": "2026. 12. 31",
       "type": "Keyboard",
-      "manufacturer": "",
+      "manufacturer": "—",
       "status": "In progress",
       "update": "2026. 6. 16",
       "note": "—"
@@ -528,7 +528,7 @@
       "gbStart": "2026. 7. 3",
       "eta": "2026. 12. 31",
       "type": "Keyboard",
-      "manufacturer": "",
+      "manufacturer": "—",
       "status": "In progress",
       "update": "2026. 7. 29",
       "note": "벤더 주문 취합 중. 지온웍스 발주 완료 / Compiling vendor orders. Order placed with Geonworks."
@@ -548,7 +548,7 @@
       "gbStart": "2026. 7. 9",
       "eta": "2027. 3. 31",
       "type": "Keyboard",
-      "manufacturer": "",
+      "manufacturer": "—",
       "status": "In progress",
       "update": "2026. 7. 22",
       "note": "—"
