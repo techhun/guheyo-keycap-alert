@@ -59,6 +59,18 @@ function gvizCellValue(cell) {
   return '';
 }
 
+function normalizeColumnLabel(value) {
+  return clean(value).toLowerCase().replace(/[|/]/g, ' ').replace(/[^a-z0-9가-힣]+/g, '');
+}
+
+function findColumnIndex(columns, aliases) {
+  const normalizedAliases = aliases.map(normalizeColumnLabel);
+  return columns.findIndex((column) => {
+    const label = normalizeColumnLabel(column?.label || '');
+    return normalizedAliases.includes(label);
+  });
+}
+
 function parseGvizResponse(text) {
   const match = String(text ?? '').match(/google\.visualization\.Query\.setResponse\((.*)\);?\s*$/s);
   if (!match) throw new Error('GEONWORKS gviz response wrapper was not recognized');
@@ -68,23 +80,49 @@ function parseGvizResponse(text) {
     throw new Error(`GEONWORKS gviz returned status ${payload.status}`);
   }
 
+  const columns = payload?.table?.cols || [];
+  const indexes = {
+    product: findColumnIndex(columns, ['제품명', 'Product']),
+    gbStart: findColumnIndex(columns, ['GB시작일', 'GB Start']),
+    eta: findColumnIndex(columns, ['예상 발송일', 'ETA']),
+    type: findColumnIndex(columns, ['분류', 'Type']),
+    manufacturer: findColumnIndex(columns, ['제조사', 'Manufacturer']),
+    status: findColumnIndex(columns, ['상태', 'Status']),
+    update: findColumnIndex(columns, ['갱신 일자', 'Update']),
+    note: findColumnIndex(columns, ['비고', 'Note'])
+  };
+
+  const missing = Object.entries(indexes).filter(([, index]) => index < 0).map(([key]) => key);
+  if (missing.length > 0) {
+    const labels = columns.map((column) => clean(column?.label)).filter(Boolean);
+    throw new Error(`GEONWORKS gviz columns did not match table schema; missing=${missing.join(',')}; labels=${labels.join(' | ')}`);
+  }
+
   const rows = (payload?.table?.rows || [])
-    .map((row) => (row?.c || []).map(gvizCellValue))
-    .filter((cells) => cells.length >= 8 && cells[0])
+    .map((row) => row?.c || [])
     .map((cells) => ({
-      product: cells[0],
-      gbStart: cells[1],
-      eta: cells[2],
-      type: cells[3],
-      manufacturer: cells[4],
-      status: cells[5],
-      update: cells[6],
-      note: cells[7] || '—'
-    }));
+      product: gvizCellValue(cells[indexes.product]),
+      gbStart: gvizCellValue(cells[indexes.gbStart]),
+      eta: gvizCellValue(cells[indexes.eta]),
+      type: gvizCellValue(cells[indexes.type]),
+      manufacturer: gvizCellValue(cells[indexes.manufacturer]),
+      status: gvizCellValue(cells[indexes.status]),
+      update: gvizCellValue(cells[indexes.update]),
+      note: gvizCellValue(cells[indexes.note]) || '—'
+    }))
+    .filter((row) => row.product);
 
   if (rows.length < 5) {
     throw new Error(`GEONWORKS gviz returned suspiciously few rows: ${rows.length}`);
   }
+
+  const sample = rows[0];
+  if (/^https?:\/\//i.test(sample.eta)
+      || /^\d{4}[.\-/]/.test(sample.manufacturer)
+      || /^\d{4}[.\-/]/.test(sample.status)) {
+    throw new Error('GEONWORKS gviz field validation failed; refusing shifted-column data');
+  }
+
   return rows;
 }
 
