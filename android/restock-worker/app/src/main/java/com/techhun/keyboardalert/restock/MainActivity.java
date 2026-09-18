@@ -91,6 +91,7 @@ public class MainActivity extends Activity {
     private LinearLayout scrollDots;
     private int renderedProductCount;
     private int dotWindowStart = -1;
+    private final List<String> renderedProductIds = new ArrayList<>();
     private TextView sessionButton;
     private WebView webView;
     private Dialog optionDialog;
@@ -107,6 +108,17 @@ public class MainActivity extends Activity {
     private boolean autoInspect;
     private boolean loginLaunching;
     private boolean optionLoadInProgress;
+
+    private static final class ProductCardHolder {
+        LinearLayout card;
+        TextView name;
+        TextView badge;
+        TextView delete;
+        TextView options;
+        TextView state;
+        Button toggle;
+        Button edit;
+    }
 
     @Override
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -838,8 +850,18 @@ public class MainActivity extends Activity {
     private void renderProducts(boolean animate) {
         if (productList == null) return;
         int oldScroll = productScroll == null ? 0 : productScroll.getScrollY();
-        productList.removeAllViews();
         JSONArray products = orderedProducts(ProductStore.list(this));
+
+        if (!animate && canReuseProductCards(products)) {
+            updateProductCards(products);
+            renderedProductCount = products.length();
+            if (productScroll != null) productScroll.post(this::updateCardDots);
+            return;
+        }
+
+        productList.removeAllViews();
+        renderedProductIds.clear();
+
         if (products.length() == 0) {
             LinearLayout empty = surface(20, 18);
             TextView value = text("등록된 상품이 없어요", 15, SUB, Typeface.NORMAL);
@@ -854,69 +876,13 @@ public class MainActivity extends Activity {
         for (int i = 0; i < products.length(); i++) {
             JSONObject product = products.optJSONObject(i);
             if (product == null) continue;
-            boolean enabled = product.optBoolean("enabled", false);
 
-            LinearLayout card = surface(20, 16);
-            productList.addView(card, sectionParams());
-            if (animate) Motion.enter(card, 35L + Math.min(i, 6) * 34L);
-
-            LinearLayout titleRow = new LinearLayout(this);
-            titleRow.setGravity(Gravity.TOP);
-            card.addView(titleRow, matchWrap());
-
-            TextView name = text(product.optString("title", "SmartStore 상품"), 16, TEXT, Typeface.BOLD);
-            titleRow.addView(name, new LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            ));
-
-            TextView badge = text(enabled ? "알림 켜짐" : "알림 꺼짐", 12, enabled ? GREEN : SUB, Typeface.BOLD);
-            badge.setGravity(Gravity.CENTER);
-            badge.setPadding(dp(9), dp(5), dp(9), dp(5));
-            badge.setBackground(roundRect(enabled ? GREEN_SOFT : FIELD, 12));
-            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            badgeParams.leftMargin = dp(8);
-            titleRow.addView(badge, badgeParams);
-
-            TextView delete = text("삭제", 12, RED, Typeface.BOLD);
-            delete.setPadding(dp(9), dp(5), 0, dp(5));
-            delete.setOnClickListener(v -> confirmDelete(product));
-            Motion.press(delete);
-            titleRow.addView(delete);
-
-            Map<String, String> labels = labelMap(product.optJSONObject("selectedLabels"));
-            String optionSummary;
-            if (labels.isEmpty()) optionSummary = "선택 옵션 없음";
-            else if (labels.size() == 1) optionSummary = labels.values().iterator().next();
-            else optionSummary = labels.values().iterator().next() + " 외 " + (labels.size() - 1) + "개";
-            TextView options = text(optionSummary, 13, SUB, Typeface.NORMAL);
-            options.setPadding(0, dp(6), 0, 0);
-            card.addView(options);
-
-            String last = product.optString("lastStatus", "");
-            if (enabled && !last.isBlank()) {
-                TextView state = text(last, 12, SUB, Typeface.NORMAL);
-                state.setPadding(0, dp(5), 0, 0);
-                card.addView(state);
-            }
-
-            LinearLayout actions = new LinearLayout(this);
-            actions.setPadding(0, dp(11), 0, 0);
-            card.addView(actions, matchWrap());
-
-            Button toggle = enabled
-                ? button("알림 끄기", RED, RED_SOFT)
-                : button("알림 켜기", Color.WHITE, BLUE);
-            toggle.setOnClickListener(v -> toggleProduct(product));
-            actions.addView(toggle, rowParams(1f, 0));
-
-            Button edit = softButton("옵션");
-            edit.setOnClickListener(v -> editProduct(product));
-            actions.addView(edit, rowParams(0.72f, 8));
+            ProductCardHolder holder = createProductCard();
+            holder.card.setTag(holder);
+            bindProductCard(holder, product);
+            productList.addView(holder.card, sectionParams());
+            renderedProductIds.add(product.optString("id", ""));
+            if (animate) Motion.enter(holder.card, 35L + Math.min(i, 6) * 34L);
         }
 
         rebuildCardDots(productList.getChildCount());
@@ -927,6 +893,115 @@ public class MainActivity extends Activity {
                 updateCardDots();
             });
         }
+    }
+
+    private boolean canReuseProductCards(JSONArray products) {
+        if (products == null || products.length() == 0) return false;
+        if (products.length() != renderedProductIds.size()) return false;
+        if (productList.getChildCount() != products.length()) return false;
+
+        for (int i = 0; i < products.length(); i++) {
+            JSONObject product = products.optJSONObject(i);
+            if (product == null) return false;
+            if (!renderedProductIds.get(i).equals(product.optString("id", ""))) return false;
+            if (!(productList.getChildAt(i).getTag() instanceof ProductCardHolder)) return false;
+        }
+        return true;
+    }
+
+    private void updateProductCards(JSONArray products) {
+        for (int i = 0; i < products.length(); i++) {
+            JSONObject product = products.optJSONObject(i);
+            View child = productList.getChildAt(i);
+            if (product == null || child == null || !(child.getTag() instanceof ProductCardHolder)) continue;
+            bindProductCard((ProductCardHolder) child.getTag(), product);
+        }
+    }
+
+    private ProductCardHolder createProductCard() {
+        ProductCardHolder holder = new ProductCardHolder();
+        holder.card = surface(20, 16);
+
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setGravity(Gravity.TOP);
+        holder.card.addView(titleRow, matchWrap());
+
+        holder.name = text("", 16, TEXT, Typeface.BOLD);
+        titleRow.addView(holder.name, new LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        ));
+
+        holder.badge = text("", 12, SUB, Typeface.BOLD);
+        holder.badge.setGravity(Gravity.CENTER);
+        holder.badge.setPadding(dp(9), dp(5), dp(9), dp(5));
+        LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        badgeParams.leftMargin = dp(8);
+        titleRow.addView(holder.badge, badgeParams);
+
+        holder.delete = text("삭제", 12, RED, Typeface.BOLD);
+        holder.delete.setPadding(dp(9), dp(5), 0, dp(5));
+        Motion.press(holder.delete);
+        titleRow.addView(holder.delete);
+
+        holder.options = text("", 13, SUB, Typeface.NORMAL);
+        holder.options.setPadding(0, dp(6), 0, 0);
+        holder.card.addView(holder.options);
+
+        holder.state = text("", 12, SUB, Typeface.NORMAL);
+        holder.state.setPadding(0, dp(5), 0, 0);
+        holder.card.addView(holder.state);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setPadding(0, dp(11), 0, 0);
+        holder.card.addView(actions, matchWrap());
+
+        holder.toggle = button("알림 켜기", Color.WHITE, BLUE);
+        actions.addView(holder.toggle, rowParams(1f, 0));
+
+        holder.edit = softButton("옵션");
+        actions.addView(holder.edit, rowParams(0.72f, 8));
+
+        return holder;
+    }
+
+    private void bindProductCard(ProductCardHolder holder, JSONObject product) {
+        boolean enabled = product.optBoolean("enabled", false);
+
+        holder.name.setText(product.optString("title", "SmartStore 상품"));
+
+        holder.badge.setText(enabled ? "알림 켜짐" : "알림 꺼짐");
+        holder.badge.setTextColor(enabled ? GREEN : SUB);
+        holder.badge.setBackground(roundRect(enabled ? GREEN_SOFT : FIELD, 12));
+
+        holder.delete.setOnClickListener(v -> confirmDelete(product));
+
+        Map<String, String> labels = labelMap(product.optJSONObject("selectedLabels"));
+        String optionSummary;
+        if (labels.isEmpty()) optionSummary = "선택 옵션 없음";
+        else if (labels.size() == 1) optionSummary = labels.values().iterator().next();
+        else optionSummary = labels.values().iterator().next() + " 외 " + (labels.size() - 1) + "개";
+        holder.options.setText(optionSummary);
+
+        String last = product.optString("lastStatus", "");
+        if (enabled && !last.isBlank()) {
+            holder.state.setText(last);
+            holder.state.setVisibility(View.VISIBLE);
+        } else {
+            holder.state.setText("");
+            holder.state.setVisibility(View.GONE);
+        }
+
+        holder.toggle.setText(enabled ? "알림 끄기" : "알림 켜기");
+        holder.toggle.setTextColor(enabled ? RED : Color.WHITE);
+        holder.toggle.setBackground(roundRect(enabled ? RED_SOFT : BLUE, 12));
+        holder.toggle.setOnClickListener(v -> toggleProduct(product));
+
+        holder.edit.setOnClickListener(v -> editProduct(product));
     }
 
     private void rebuildCardDots(int productCount) {
@@ -953,7 +1028,7 @@ public class MainActivity extends Activity {
         boolean atTop = scrollY <= dp(4);
         boolean atBottom = maxScroll > 0 && scrollY >= maxScroll - dp(4);
 
-        int active = atTop ? 0 : atBottom ? count - 1 : closestCardIndex(count);
+        int active = atTop ? 0 : atBottom ? count - 1 : focusedCardIndex(count, scrollY, viewport);
         int visibleCount = Math.min(7, count);
         int start = count <= 7
             ? 0
@@ -964,7 +1039,6 @@ public class MainActivity extends Activity {
         }
 
         scrollDots.setVisibility(View.VISIBLE);
-        float viewportCenter = productScroll.getScrollY() + viewport / 2f;
 
         for (int i = 0; i < scrollDots.getChildCount(); i++) {
             View holder = scrollDots.getChildAt(i);
@@ -979,12 +1053,11 @@ public class MainActivity extends Activity {
             View card = productList.getChildAt(target);
             if (dot == null || card == null) continue;
 
-            float cardCenter = card.getTop() + card.getHeight() / 2f;
-            float distance = Math.abs(cardCenter - viewportCenter);
-            float emphasisRange = Math.max(dp(90), card.getHeight() * 0.9f);
-            float emphasis = Math.max(0f, 1f - distance / emphasisRange);
+            float emphasis = cardFocusScore(card, scrollY, viewport);
             if ((atTop && target == 0) || (atBottom && target == count - 1)) {
                 emphasis = 1f;
+            } else if (target == active) {
+                emphasis = Math.max(0.88f, emphasis);
             }
 
             boolean hasBefore = start > 0 && i == 0;
@@ -1032,23 +1105,38 @@ public class MainActivity extends Activity {
         }
     }
 
-    private int closestCardIndex(int count) {
-        int viewport = productScroll.getHeight() - productScroll.getPaddingTop() - productScroll.getPaddingBottom();
-        float center = productScroll.getScrollY() + viewport / 2f;
-        int closest = 0;
-        float closestDistance = Float.MAX_VALUE;
+    private int focusedCardIndex(int count, int scrollY, int viewport) {
+        int focused = 0;
+        float bestScore = -1f;
 
         for (int i = 0; i < count; i++) {
             View card = productList.getChildAt(i);
             if (card == null) continue;
-            float cardCenter = card.getTop() + card.getHeight() / 2f;
-            float distance = Math.abs(cardCenter - center);
-            if (distance < closestDistance) {
-                closestDistance = distance;
-                closest = i;
+            float score = cardFocusScore(card, scrollY, viewport);
+            if (score > bestScore) {
+                bestScore = score;
+                focused = i;
             }
         }
-        return closest;
+        return focused;
+    }
+
+    private float cardFocusScore(View card, int scrollY, int viewport) {
+        if (card == null || card.getHeight() <= 0 || viewport <= 0) return 0f;
+
+        float visibleTop = scrollY;
+        float visibleBottom = scrollY + viewport;
+        float cardTop = card.getTop();
+        float cardBottom = card.getBottom();
+        float overlap = Math.max(0f, Math.min(cardBottom, visibleBottom) - Math.max(cardTop, visibleTop));
+        float visibility = Math.min(1f, overlap / Math.max(1f, card.getHeight()));
+
+        float viewportCenter = scrollY + viewport / 2f;
+        float cardCenter = cardTop + card.getHeight() / 2f;
+        float centerRange = viewport / 2f + card.getHeight() / 2f;
+        float centerScore = Math.max(0f, 1f - Math.abs(cardCenter - viewportCenter) / Math.max(1f, centerRange));
+
+        return Math.min(1f, visibility * 0.72f + centerScore * 0.28f);
     }
 
     private void scrollCardToCenter(int index) {
