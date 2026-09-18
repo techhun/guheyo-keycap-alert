@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
         productScroll = new ScrollView(this);
         productScroll.setFillViewport(true);
         productScroll.setClipToPadding(false);
-        productScroll.setPadding(0, 0, dp(18), dp(12));
+        productScroll.setPadding(0, 0, dp(32), dp(12));
         productScroll.setVerticalScrollBarEnabled(false);
         productScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         productArea.addView(productScroll, new FrameLayout.LayoutParams(
@@ -948,7 +948,12 @@ public class MainActivity extends Activity {
             return;
         }
 
-        int active = closestCardIndex(count);
+        int scrollY = productScroll.getScrollY();
+        int maxScroll = Math.max(0, content - viewport);
+        boolean atTop = scrollY <= dp(4);
+        boolean atBottom = maxScroll > 0 && scrollY >= maxScroll - dp(4);
+
+        int active = atTop ? 0 : atBottom ? count - 1 : closestCardIndex(count);
         int visibleCount = Math.min(7, count);
         int start = count <= 7
             ? 0
@@ -978,6 +983,9 @@ public class MainActivity extends Activity {
             float distance = Math.abs(cardCenter - viewportCenter);
             float emphasisRange = Math.max(dp(90), card.getHeight() * 0.9f);
             float emphasis = Math.max(0f, 1f - distance / emphasisRange);
+            if ((atTop && target == 0) || (atBottom && target == count - 1)) {
+                emphasis = 1f;
+            }
 
             boolean hasBefore = start > 0 && i == 0;
             boolean hasAfter = start + visibleCount < count && i == visibleCount - 1;
