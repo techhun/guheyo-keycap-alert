@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { chromium } from 'playwright';
+import { bulkChangeInfo, changeSignature, clean, comparableValue, normalizeKey, parseGbGvizResponse, validateGbRows } from './geonworks-safety.mjs';
 
 const PAGE_URL = 'https://geonworks.kr/customhtml/GB_schedule.html';
 const DATA_URL = 'https://docs.google.com/spreadsheets/d/1i9SK14aWxpElXrjMinidKjVCXDi1XXBQSZJVB7ocbJk/gviz/tq?tqx=out:json&sheet=GB%20Schedule';
@@ -19,13 +20,6 @@ const FIELD_LABELS = {
 const COMPARED_FIELDS = Object.keys(FIELD_LABELS);
 const DATE_LABELS = new Set(['GB 시작일', '예상 발송일', '갱신 일자', '마지막 갱신']);
 
-function clean(value) {
-  return String(value ?? '')
-    .replace(/\r/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function truncate(value, maxLength = 1000) {
   const text = String(value ?? '')
     .replace(/\r/g, '')
@@ -35,16 +29,6 @@ function truncate(value, maxLength = 1000) {
     .join('\n') || '—';
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
-function comparableValue(value) {
-  const text = clean(value);
-  if (!text || /^(?:—|–|-)$/u.test(text)) return '';
-  return text;
-}
-
-function normalizeKey(value) {
-  return comparableValue(value).toLocaleLowerCase('en-US');
 }
 
 function displayValue(label, value) {
@@ -58,80 +42,6 @@ function displayValue(label, value) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
-function gvizCellValue(cell) {
-  if (!cell) return '';
-  if (cell.f !== undefined && cell.f !== null) return clean(cell.f);
-  if (cell.v !== undefined && cell.v !== null) return clean(cell.v);
-  return '';
-}
-
-function normalizeColumnLabel(value) {
-  return clean(value).toLowerCase().replace(/[|/]/g, ' ').replace(/[^a-z0-9가-힣]+/g, '');
-}
-
-function findColumnIndex(columns, aliases) {
-  const normalizedAliases = aliases.map(normalizeColumnLabel);
-  return columns.findIndex((column) => {
-    const label = normalizeColumnLabel(column?.label || '');
-    return normalizedAliases.includes(label);
-  });
-}
-
-function parseGvizResponse(text) {
-  const match = String(text ?? '').match(/google\.visualization\.Query\.setResponse\((.*)\);?\s*$/s);
-  if (!match) throw new Error('GEONWORKS gviz response wrapper was not recognized');
-
-  const payload = JSON.parse(match[1]);
-  if (payload?.status && payload.status !== 'ok') {
-    throw new Error(`GEONWORKS gviz returned status ${payload.status}`);
-  }
-
-  const columns = payload?.table?.cols || [];
-  const indexes = {
-    product: findColumnIndex(columns, ['제품명', 'Product']),
-    gbStart: findColumnIndex(columns, ['GB시작일', 'GB Start']),
-    eta: findColumnIndex(columns, ['예상 발송일', 'ETA']),
-    type: findColumnIndex(columns, ['분류', 'Type']),
-    manufacturer: findColumnIndex(columns, ['제조사', 'Manufacturer']),
-    status: findColumnIndex(columns, ['상태', 'Status']),
-    update: findColumnIndex(columns, ['갱신 일자', 'Update']),
-    note: findColumnIndex(columns, ['비고', 'Note'])
-  };
-
-  const missing = Object.entries(indexes).filter(([, index]) => index < 0).map(([key]) => key);
-  if (missing.length > 0) {
-    const labels = columns.map((column) => clean(column?.label)).filter(Boolean);
-    throw new Error(`GEONWORKS gviz columns did not match table schema; missing=${missing.join(',')}; labels=${labels.join(' | ')}`);
-  }
-
-  const rows = (payload?.table?.rows || [])
-    .map((row) => row?.c || [])
-    .map((cells) => ({
-      product: gvizCellValue(cells[indexes.product]),
-      gbStart: gvizCellValue(cells[indexes.gbStart]),
-      eta: gvizCellValue(cells[indexes.eta]),
-      type: gvizCellValue(cells[indexes.type]),
-      manufacturer: gvizCellValue(cells[indexes.manufacturer]),
-      status: gvizCellValue(cells[indexes.status]),
-      update: gvizCellValue(cells[indexes.update]),
-      note: gvizCellValue(cells[indexes.note]) || '—'
-    }))
-    .filter((row) => row.product);
-
-  if (rows.length < 5) {
-    throw new Error(`GEONWORKS gviz returned suspiciously few rows: ${rows.length}`);
-  }
-
-  const sample = rows[0];
-  if (/^https?:\/\//i.test(sample.eta)
-      || /^\d{4}[.\-/]/.test(sample.manufacturer)
-      || /^\d{4}[.\-/]/.test(sample.status)) {
-    throw new Error('GEONWORKS gviz field validation failed; refusing shifted-column data');
-  }
-
-  return rows;
-}
-
 async function fetchRowsDirect() {
   const response = await fetch(DATA_URL, {
     headers: { 'accept': 'application/json,text/plain,*/*' },
@@ -139,7 +49,7 @@ async function fetchRowsDirect() {
   });
   if (!response.ok) throw new Error(`GEONWORKS gviz HTTP ${response.status}`);
 
-  const rows = parseGvizResponse(await response.text());
+  const rows = parseGbGvizResponse(await response.text());
   console.log(`GEONWORKS GB direct rows: ${rows.length}`);
   return rows;
 }
@@ -175,10 +85,7 @@ async function fetchRowsBrowser() {
         }));
     });
 
-    if (rows.length < 5) {
-      throw new Error(`GEONWORKS page returned suspiciously few rows: ${rows.length}`);
-    }
-
+    validateGbRows(rows);
     console.log(`GEONWORKS GB browser fallback rows: ${rows.length}`);
     return rows;
   } finally {
@@ -362,6 +269,7 @@ if (!state?.initialized || previousRows.length === 0) {
 }
 
 const validateRows = (candidateRows) => {
+  validateGbRows(candidateRows);
   if (candidateRows.length < Math.max(5, Math.floor(previousRows.length * 0.5))) {
     throw new Error(`GEONWORKS row count dropped unexpectedly: ${previousRows.length} -> ${candidateRows.length}. State was not updated.`);
   }
@@ -374,21 +282,26 @@ const removalSignature = (candidateChanges) => candidateChanges
 
 validateRows(rows);
 let changes = diffRows(previousRows, rows);
+let bulkInfo = bulkChangeInfo(changes, previousRows.length);
 const firstRemovalSignature = removalSignature(changes);
-if (firstRemovalSignature) {
-  console.warn('GEONWORKS removal detected; re-reading once before notifying.');
+const needsVerification = Boolean(firstRemovalSignature) || bulkInfo.bulk;
+
+if (needsVerification) {
+  console.warn(`GEONWORKS ${bulkInfo.bulk ? `bulk change detected (${bulkInfo.count}, ${Math.round(bulkInfo.ratio * 100)}%)` : 'removal detected'}; re-reading once before notifying.`);
+  const firstSignature = changeSignature(changes);
   const verificationRows = await fetchRows();
   validateRows(verificationRows);
   const verificationChanges = diffRows(previousRows, verificationRows);
-  const secondRemovalSignature = removalSignature(verificationChanges);
-  if (secondRemovalSignature && secondRemovalSignature !== firstRemovalSignature) {
-    throw new Error('GEONWORKS removal set changed during verification. State was not updated.');
+  const secondSignature = changeSignature(verificationChanges);
+
+  if (firstSignature !== secondSignature) {
+    throw new Error('GEONWORKS change set changed during verification. State was not updated.');
   }
+
   rows = verificationRows;
   changes = verificationChanges;
-  console.log(secondRemovalSignature
-    ? 'GEONWORKS removal confirmed by two consecutive reads.'
-    : 'GEONWORKS removal disappeared on verification; using the verified second snapshot.');
+  bulkInfo = bulkChangeInfo(changes, previousRows.length);
+  console.log(`GEONWORKS change set confirmed by two consecutive reads: ${changes.length} change(s).`);
 }
 
 console.log(`GEONWORKS changes: ${changes.length}`);
@@ -408,6 +321,28 @@ if (changes.length === 0) {
 
 if (!DISCORD_WEBHOOK_URL) {
   console.log('[discord] GEONWORKS_DISCORD_WEBHOOK_URL is not configured. Changes remain pending; state was not updated.');
+  process.exit(0);
+}
+
+if (bulkInfo.bulk) {
+  await postDiscord({
+    ...baseEmbed('⚠️ GEONWORKS 대량 변경 확인'),
+    description: `동일한 변경을 두 번 연속 확인했습니다. 개별 알림 대신 요약합니다.\n변경 항목: **${changes.length}개** / 기존 목록: **${previousRows.length}개**`,
+    fields: [
+      {
+        name: '변경 예시',
+        value: truncate(changes.slice(0, 10).map((change) => {
+          const labels = change.kind === 'changed'
+            ? change.fields.map((field) => field.label).join(', ')
+            : change.kind;
+          return `• ${change.row.product}: ${labels}`;
+        }).join('\n')),
+        inline: false
+      }
+    ]
+  });
+  saveState(rows);
+  console.log(`Bulk GEONWORKS change summarized in one notification and state updated: ${changes.length} change(s).`);
   process.exit(0);
 }
 
