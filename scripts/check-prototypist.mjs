@@ -30,6 +30,7 @@ const truncate = (value, maxLength = 1000) => {
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DETAIL_TIMEOUT_MS = 12000;
+const FALLBACK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function normalizeUrl(value) {
   try {
@@ -191,20 +192,50 @@ async function fetchSource(context, source) {
   throw lastError;
 }
 
-async function fetchRows() {
+async function fetchRows(previousRows = [], previousFallbackSince = {}) {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 2200, height: 1600 },
     locale: 'en-GB'
   });
 
+  const fallbackSince = { ...(previousFallbackSince || {}) };
+  let fallbackMetadataChanged = false;
+
   try {
     const all = [];
+
     for (const source of SOURCES) {
-      all.push(...await fetchSource(context, source));
+      try {
+        all.push(...await fetchSource(context, source));
+        if (fallbackSince[source.id]) {
+          delete fallbackSince[source.id];
+          fallbackMetadataChanged = true;
+          console.log(`Proto[Typist] ${source.label} fresh data recovered; fallback timer cleared.`);
+        }
+      } catch (error) {
+        const fallbackRows = previousRows.filter((row) => row.sourceId === source.id);
+        if (fallbackRows.length === 0) throw error;
+
+        const startedAt = fallbackSince[source.id] || new Date().toISOString();
+        const ageMs = Date.now() - Date.parse(startedAt);
+        if (!Number.isFinite(ageMs) || ageMs >= FALLBACK_MAX_AGE_MS) {
+          throw new Error(`Proto[Typist] ${source.label} has been unavailable for more than 6 hours: ${error?.message || error}`);
+        }
+
+        if (!fallbackSince[source.id]) {
+          fallbackSince[source.id] = startedAt;
+          fallbackMetadataChanged = true;
+        }
+
+        console.warn(`Proto[Typist] ${source.label} unavailable after retries. Reusing ${fallbackRows.length} stored rows; fallback age=${Math.floor(ageMs / 60000)}m.`);
+        all.push(...fallbackRows);
+      }
+
       await sleep(1500);
     }
-    return all;
+
+    return { rows: all, fallbackSince, fallbackMetadataChanged };
   } finally {
     await context.close();
     await browser.close();
@@ -292,14 +323,15 @@ function loadState() {
   }
 }
 
-function saveState(rows) {
+function saveState(rows, fallbackSince = {}) {
   fs.writeFileSync(
     STATE_PATH,
     JSON.stringify({
       version: 1,
       initialized: true,
       updatedAt: new Date().toISOString(),
-      rows
+      rows,
+      fallbackSince
     }, null, 2) + '\n'
   );
 }
@@ -459,16 +491,20 @@ async function notify(change) {
 }
 
 async function main() {
-let rows = await fetchRows();
+const state = loadState();
+const previousRows = Array.isArray(state?.rows) ? state.rows : [];
+const previousFallbackSince = state?.fallbackSince && typeof state.fallbackSince === 'object' ? state.fallbackSince : {};
+let snapshot = await fetchRows(previousRows, previousFallbackSince);
+let rows = snapshot.rows;
+let fallbackSince = snapshot.fallbackSince;
+let fallbackMetadataChanged = snapshot.fallbackMetadataChanged;
+
 console.log(`Proto[Typist] total rows: ${rows.length}`);
 console.log('Proto[Typist] counts:', JSON.stringify(sourceCounts(rows)));
 
-const state = loadState();
-const previousRows = Array.isArray(state?.rows) ? state.rows : [];
-
 if (!state?.initialized || previousRows.length === 0) {
   console.log(`Baseline initialization: storing ${rows.length} Proto[Typist] rows without notifying.`);
-  saveState(rows);
+  saveState(rows, fallbackSince);
   process.exit(0);
 }
 
@@ -494,7 +530,10 @@ let changes = diffRows(previousRows, rows);
 const firstRemovalSignature = removalSignature(changes);
 if (firstRemovalSignature) {
   console.warn('Proto[Typist] removal detected; re-reading once before notifying.');
-  const verificationRows = await fetchRows();
+  const verificationSnapshot = await fetchRows(previousRows, fallbackSince);
+  const verificationRows = verificationSnapshot.rows;
+  fallbackSince = verificationSnapshot.fallbackSince;
+  fallbackMetadataChanged ||= verificationSnapshot.fallbackMetadataChanged;
   validateSourceCounts(verificationRows);
   const verificationChanges = diffRows(previousRows, verificationRows);
   const secondRemovalSignature = removalSignature(verificationChanges);
@@ -519,7 +558,12 @@ for (const change of changes) {
 }
 
 if (changes.length === 0) {
-  console.log('No Proto[Typist] state update needed.');
+  if (fallbackMetadataChanged) {
+    saveState(rows, fallbackSince);
+    console.log('Proto[Typist] fallback metadata updated.');
+  } else {
+    console.log('No Proto[Typist] state update needed.');
+  }
   process.exit(0);
 }
 
@@ -532,7 +576,7 @@ await addDetailNotes(changes).catch((error) => {
   console.warn(`Proto[Typist] detail lookups skipped: ${error?.message || error}`);
 });
 for (const change of changes) await notify(change);
-saveState(rows);
+saveState(rows, fallbackSince);
 console.log(`Sent ${changes.length} Proto[Typist] notification(s) and updated state.`);
 }
 
