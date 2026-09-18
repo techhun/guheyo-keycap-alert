@@ -17,6 +17,100 @@ const clean = (value) => String(value ?? '')
   .trim();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function decodeHtml(value) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&#x27;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
+function textFromHtml(value) {
+  return clean(decodeHtml(String(value ?? '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')));
+}
+
+function attrValue(tag, name) {
+  const match = String(tag ?? '').match(new RegExp('\\b' + name + '\\s*=\\s*["\\']([^"\\']*)["\\']', 'i'));
+  return match ? decodeHtml(match[1]) : '';
+}
+
+function parseDesktopHtml(html) {
+  const rows = [];
+  const blocks = String(html ?? '').match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+
+  for (const block of blocks) {
+    const openTag = block.match(/^<tr\b[^>]*>/i)?.[0] || '';
+    const noFromAttr = Number(attrValue(openTag, 'data-no'));
+    const noFromLink = Number(block.match(/[?&]no=(\d+)/i)?.[1] || 0);
+    const no = Number.isFinite(noFromAttr) && noFromAttr > 0 ? noFromAttr : noFromLink;
+    if (!no) continue;
+
+    const category = textFromHtml(
+      block.match(/<td\b[^>]*class=["'][^"']*(?:gall_subject|subject_head)[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)?.[1] || ''
+    );
+    if (/공지|설문|AD|광고/i.test(category)) continue;
+    if (!/떴냐/i.test(category)) continue;
+
+    const anchor = block.match(/<a\b[^>]*href=["']([^"']*(?:[?&]no=\d+|\/mechanicalkeyboard\/\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!anchor) continue;
+
+    const title = textFromHtml(anchor[2])
+      .replace(/^\[(?:⚡\s*)?떴냐\]\s*/i, '')
+      .replace(/^(?:⚡\s*)?떴냐\s*/i, '')
+      .trim();
+    if (!title || title.length > 300) continue;
+
+    const writerTag = block.match(/<(?:td|span)\b[^>]*class=["'][^"']*(?:gall_writer|writer)[^"']*["'][^>]*>/i)?.[0] || '';
+    const writerCell = block.match(/<(?:td|span)\b[^>]*class=["'][^"']*(?:gall_writer|writer)[^"']*["'][^>]*>([\s\S]*?)<\/(?:td|span)>/i)?.[1] || '';
+    const author = clean(attrValue(writerTag, 'data-nick') || textFromHtml(writerCell));
+
+    const dateTag = block.match(/<(?:td|span|time)\b[^>]*class=["'][^"']*(?:gall_date|date)[^"']*["'][^>]*>/i)?.[0] || '';
+    const dateCell = block.match(/<(?:td|span|time)\b[^>]*class=["'][^"']*(?:gall_date|date)[^"']*["'][^>]*>([\s\S]*?)<\/(?:td|span|time)>/i)?.[1] || '';
+    const date = clean(attrValue(dateTag, 'title') || textFromHtml(dateCell));
+
+    rows.push({
+      no,
+      title,
+      author,
+      date,
+      category,
+      url: 'https://m.dcinside.com/board/mechanicalkeyboard/' + no
+    });
+  }
+
+  return [...new Map(rows.map((row) => [row.no, row])).values()].sort((a, b) => b.no - a.no);
+}
+
+async function fetchRowsHttp() {
+  const response = await fetch(DESKTOP_URL, {
+    headers: {
+      'accept': 'text/html,application/xhtml+xml',
+      'accept-language': 'ko-KR,ko;q=0.9,en;q=0.8',
+      'user-agent': 'Mozilla/5.0'
+    },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) throw new Error('DCInside direct HTTP ' + response.status);
+
+  const html = await response.text();
+  if (!/떴냐/.test(html)) throw new Error('DCInside direct HTTP page did not contain the 떴냐 category');
+
+  const rows = parseDesktopHtml(html);
+  if (rows.length < 1) throw new Error('DCInside direct HTTP returned no 떴냐 post rows');
+  if (rows.some((row) => !/떴냐/i.test(row.category))) {
+    throw new Error('DCInside direct HTTP returned rows outside the 떴냐 category');
+  }
+
+  console.log('DCInside 떴냐 source: direct-http');
+  console.log('DCInside 떴냐 direct HTTP rows: ' + rows.length);
+  console.log('DCInside 떴냐 direct HTTP sample:', JSON.stringify(rows.slice(0, 3), null, 2));
+  return { rows, sourceId: 'direct-http' };
+}
+
 function loadState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
@@ -130,7 +224,7 @@ async function extractRows(page, source) {
   return { rows: result.rows, sourceId: source.id };
 }
 
-async function fetchRows() {
+async function fetchRowsBrowser() {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1600 },
@@ -161,6 +255,15 @@ async function fetchRows() {
   }
 
   throw lastError || new Error('DCInside list could not be loaded');
+}
+
+async function fetchRows() {
+  try {
+    return await fetchRowsHttp();
+  } catch (error) {
+    console.warn('DCInside direct HTTP failed; using browser fallback: ' + (error?.message || error));
+    return fetchRowsBrowser();
+  }
 }
 
 async function postDiscord(row) {
