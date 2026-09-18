@@ -38,3 +38,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Run regression tests
         run: npm test
+      - name: Smoke check GEONWORKS GB
+        run: npm run check:geonworks
+      - name: Smoke check GEONWORKS Release
+        run: npm run check:geonworks-release
