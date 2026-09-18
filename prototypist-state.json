@@ -1,7 +1,7 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-18T12:51:29.939Z",
+  "updatedAt": "2026-09-18T13:01:37.611Z",
   "rows": [
     {
       "sourceId": "keyboard",
@@ -708,6 +708,16 @@
       "sourceLabel": "GMK",
       "sourceEmoji": "🇩🇪",
       "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
+      "itemUrl": "https://prototypist.notion.site/GMK-MTNU-Oblivion-3df0423341548036b80feb4aa6c7da11",
+      "product": "GMK MTNU Oblivion",
+      "status": "In Group Buy",
+      "expectedShipping": "Q2 2027"
+    },
+    {
+      "sourceId": "gmk",
+      "sourceLabel": "GMK",
+      "sourceEmoji": "🇩🇪",
+      "sourceUrl": "https://prototypist.notion.site/dfedac384a2b494c9137be7638b11e93?v=11769ac8c9764aafb907fe3d65fb0c50",
       "itemUrl": "https://prototypist.notion.site/GMK-CYL-Gurokawa-24c04233415480088007c686c4908f2b",
       "product": "GMK CYL Gurokawa",
       "status": "In Manufacturing",
@@ -1182,36 +1192,6 @@
       "product": "GMK CYL Cherry Love",
       "status": "Completed",
       "expectedShipping": "Q2 2026"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/MW-Virtual-3d104233415480949bd8d9b1c28cce9e",
-      "product": "MW Virtual",
-      "status": "In Group Buy",
-      "expectedShipping": "Q1 2027"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/SWG-Lavender-3d104233415480c89a35f48da94dad73",
-      "product": "SWG Lavender",
-      "status": "In Group Buy",
-      "expectedShipping": "Q1 2027"
-    },
-    {
-      "sourceId": "keyset",
-      "sourceLabel": "Keyset",
-      "sourceEmoji": "🧢",
-      "sourceUrl": "https://prototypist.notion.site/119c46c4a89140e98b295ed0102eb94e?v=a13cd09931964dd596b125ea0013f5c6",
-      "itemUrl": "https://prototypist.notion.site/SWG-Hypermix-3d1042334154807d8399f0d8015917a7",
-      "product": "SWG Hypermix",
-      "status": "In Group Buy",
-      "expectedShipping": "Q1 2027"
     },
     {
       "sourceId": "keyset",
@@ -1804,8 +1784,5 @@
       "expectedShipping": "Q1 2026"
     }
   ],
-  "fallbackSince": {
-    "gmk": "2026-09-18T12:51:15.949Z",
-    "keyset": "2026-09-18T12:51:28.378Z"
-  }
+  "fallbackSince": {}
 }
