@@ -60,6 +60,24 @@ async function fetchRows() {
       locale: 'ko-KR'
     });
 
+    const dataRequests = new Set();
+    page.on('response', (response) => {
+      try {
+        const url = new URL(response.url());
+        if (/google|docs|sheets|gviz|csv/i.test(url.hostname + url.pathname + url.search)) {
+          dataRequests.add(`${response.status()} ${url.toString()}`);
+        }
+      } catch {}
+    });
+    page.on('requestfailed', (request) => {
+      try {
+        const url = new URL(request.url());
+        if (/google|docs|sheets|gviz|csv/i.test(url.hostname + url.pathname + url.search)) {
+          dataRequests.add(`FAILED ${url.toString()} · ${request.failure()?.errorText || 'unknown'}`);
+        }
+      } catch {}
+    });
+
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForSelector('#tableBody tr', { timeout: 30000 });
     await page.waitForTimeout(500);
@@ -81,6 +99,10 @@ async function fetchRows() {
           note: cells[7] || '—'
         }));
     });
+
+    if (dataRequests.size > 0) {
+      console.log('GEONWORKS data requests:', JSON.stringify([...dataRequests].slice(0, 20), null, 2));
+    }
 
     if (rows.length < 5) {
       throw new Error(`GEONWORKS page returned suspiciously few rows: ${rows.length}`);
