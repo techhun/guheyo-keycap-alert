@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 
 import {
   bulkChangeInfo,
+  changeId,
   changeSignature,
   comparableValue,
   parseGbGvizResponse,
+  pruneSentChanges,
   validateGbRows,
   validateReleaseRows
 } from '../scripts/geonworks-safety.mjs';
@@ -128,4 +130,28 @@ test('change signatures normalize empty placeholders', () => {
     fields: [{ field: 'manufacturer', before: '', after: 'GMK' }]
   }];
   assert.equal(changeSignature(a), changeSignature(b));
+});
+
+
+test('change IDs are stable and distinct for different transitions', () => {
+  const base = {
+    kind: 'changed',
+    row: { product: 'RF-8X' },
+    fields: [{ field: 'status', before: 'In progress', after: 'Shipping' }]
+  };
+  assert.equal(changeId(base), changeId(structuredClone(base)));
+
+  const reversed = structuredClone(base);
+  reversed.fields[0] = { field: 'status', before: 'Shipping', after: 'In progress' };
+  assert.notEqual(changeId(base), changeId(reversed));
+});
+
+test('sent change history expires after seven days', () => {
+  const now = Date.parse('2026-09-18T00:00:00Z');
+  const sent = {
+    fresh: '2026-09-17T00:00:00Z',
+    stale: '2026-09-01T00:00:00Z',
+    bad: 'not-a-date'
+  };
+  assert.deepEqual(pruneSentChanges(sent, now), { fresh: '2026-09-17T00:00:00Z' });
 });
