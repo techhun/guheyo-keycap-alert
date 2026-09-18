@@ -1,19 +1,8 @@
 {
   "version": 1,
   "initialized": true,
-  "updatedAt": "2026-09-16T08:19:49.238Z",
+  "updatedAt": "2026-09-18T00:20:50.562Z",
   "rows": [
-    {
-      "product": "SENSY Supernova",
-      "manufacturer": "SENSY",
-      "region": "KR/GLOBAL",
-      "saleType": "Group Buy",
-      "type": "Keyboard",
-      "status": "For Sale",
-      "fixed": "확정 / Fixed",
-      "start": "2026-08-20",
-      "end": "2026-09-17"
-    },
     {
       "product": "Keykobo Cobalt",
       "manufacturer": "KEYKOBO",
@@ -77,8 +66,8 @@
       "type": "Keyboard",
       "status": "For Sale",
       "fixed": "확정 / Fixed",
-      "start": "2026-10-04",
-      "end": "2026-09-21"
+      "start": "2026-09-21",
+      "end": "2026-10-04"
     }
   ]
 }
