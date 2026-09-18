@@ -70,11 +70,19 @@ async function fetchRows() {
     });
 
     const dataRequests = new Set();
+    const dataResponseBodies = [];
     page.on('response', (response) => {
       try {
         const url = new URL(response.url());
         if (/google|docs|sheets|gviz|csv/i.test(url.hostname + url.pathname + url.search)) {
           dataRequests.add(`${response.status()} ${url.toString()}`);
+        }
+        if (url.hostname === 'script.googleusercontent.com') {
+          dataResponseBodies.push(
+            response.text()
+              .then((body) => ({ url: url.toString(), body: String(body || '').slice(0, 6000) }))
+              .catch(() => null)
+          );
         }
       } catch {}
     });
@@ -127,6 +135,10 @@ async function fetchRows() {
 
     if (dataRequests.size > 0) {
       console.log('GEONWORKS data requests:', JSON.stringify([...dataRequests].slice(0, 20), null, 2));
+    }
+    const responseBodies = (await Promise.all(dataResponseBodies)).filter(Boolean);
+    if (responseBodies.length > 0) {
+      console.log('GEONWORKS Release data response sample:', JSON.stringify(responseBodies[0], null, 2));
     }
 
     if (rows.length < 1) {
