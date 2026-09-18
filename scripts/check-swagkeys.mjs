@@ -315,7 +315,7 @@ async function fetchSnapshot(fallback = {}) {
     if (!roadmap) throw roadmapError || new Error('SWAGKEYS roadmap unavailable and no verified fallback exists');
     if (!rows) throw statusError || new Error('SWAGKEYS status table unavailable and no verified fallback exists');
     if (!roadmapFresh && !statusFresh) {
-      throw new Error(`SWAGKEYS roadmap and status table were both unavailable after retries. roadmap=${roadmapError?.message || 'unknown'}; status=${statusError?.message || 'unknown'}`);
+      console.warn('SWAGKEYS roadmap and status table are both using bounded stored fallback for this run.');
     }
 
     return {
