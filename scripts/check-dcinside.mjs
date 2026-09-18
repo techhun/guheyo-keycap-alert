@@ -34,7 +34,7 @@ function textFromHtml(value) {
 }
 
 function attrValue(tag, name) {
-  const match = String(tag ?? '').match(new RegExp('\\b' + name + '\\s*=\\s*["\\']([^"\\']*)["\\']', 'i'));
+  const match = String(tag ?? '').match(new RegExp("\\b" + name + "\\s*=\\s*[\\\"']([^\\\"']*)[\\\"']", "i"));
   return match ? decodeHtml(match[1]) : '';
 }
 
@@ -45,7 +45,7 @@ function parseDesktopHtml(html) {
   for (const block of blocks) {
     const openTag = block.match(/^<tr\b[^>]*>/i)?.[0] || '';
     const noFromAttr = Number(attrValue(openTag, 'data-no'));
-    const noFromLink = Number(block.match(/[?&]no=(\d+)/i)?.[1] || 0);
+    const noFromLink = Number(block.match(/(?:[?&]|&amp;)no=(\d+)/i)?.[1] || 0);
     const no = Number.isFinite(noFromAttr) && noFromAttr > 0 ? noFromAttr : noFromLink;
     if (!no) continue;
 
@@ -55,7 +55,7 @@ function parseDesktopHtml(html) {
     if (/공지|설문|AD|광고/i.test(category)) continue;
     if (!/떴냐/i.test(category)) continue;
 
-    const anchor = block.match(/<a\b[^>]*href=["']([^"']*(?:[?&]no=\d+|\/mechanicalkeyboard\/\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
+    const anchor = block.match(/<a\b[^>]*href=["']([^"']*(?:(?:[?&]|&amp;)no=\d+|\/mechanicalkeyboard\/\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/i);
     if (!anchor) continue;
 
     const title = textFromHtml(anchor[2])
