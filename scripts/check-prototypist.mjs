@@ -195,8 +195,7 @@ async function fetchRows() {
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({
     viewport: { width: 2200, height: 1600 },
-    locale: 'en-GB',
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+    locale: 'en-GB'
   });
 
   try {
@@ -266,8 +265,7 @@ async function addDetailNotes(changes) {
 
   const context = await browser.newContext({
     viewport: { width: 1400, height: 1000 },
-    locale: 'en-GB',
-    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36'
+    locale: 'en-GB'
   });
 
   try {
