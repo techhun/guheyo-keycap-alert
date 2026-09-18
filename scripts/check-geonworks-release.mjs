@@ -92,15 +92,15 @@ function normalizeReleaseItem(item) {
   if (!item || typeof item !== 'object') return null;
 
   const row = {
-    product: normalizedObjectValue(item, ['product', 'product name', 'name', '제품명']),
-    manufacturer: normalizedObjectValue(item, ['manufacturer', 'maker', '제조사']),
-    region: normalizedObjectValue(item, ['region', '지역']),
+    product: normalizedObjectValue(item, ['product', 'product name', 'name', 'items', '제품명']),
+    manufacturer: normalizedObjectValue(item, ['manufacturer', 'maker', 'brand', '제조사']),
+    region: normalizedObjectValue(item, ['region', 'krGlobal', 'kr global', '지역']),
     saleType: normalizedObjectValue(item, ['sale type', 'saletype', 'sale_type', '판매 방식', '판매방식', '분류']),
     type: normalizedObjectValue(item, ['type', '유형']),
     status: normalizedObjectValue(item, ['status', '상태']),
     fixed: normalizedObjectValue(item, ['fixed', '판매 결정', '판매결정']),
-    start: normalizedObjectValue(item, ['start', 'start date', 'startdate', '판매 시작일', '판매시작일']),
-    end: normalizedObjectValue(item, ['end', 'end date', 'enddate', '판매 종료일', '판매종료일'])
+    start: normalizedObjectValue(item, ['start', 'start date', 'startdate', 'saleStart', 'sale start', '판매 시작일', '판매시작일']),
+    end: normalizedObjectValue(item, ['end', 'end date', 'enddate', 'saleEnd', 'sale end', '판매 종료일', '판매종료일'])
   };
 
   return row.product ? row : null;
